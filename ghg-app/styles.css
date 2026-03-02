@@ -1,0 +1,160 @@
+:root {
+  --bg: #07110d;
+  --bg-alt: #0c1a15;
+  --text: #d6f4e4;
+  --muted: #8cb4a0;
+  --accent: #27f58d;
+  --accent-dark: #15995c;
+  --danger: #ff6b81;
+  --border: #1f3a2f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Segoe UI, Arial, sans-serif;
+  background: radial-gradient(circle at top, #0f221a, var(--bg));
+  color: var(--text);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(5, 10, 8, 0.8);
+  position: sticky;
+  top: 0;
+  backdrop-filter: blur(4px);
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.logo {
+  width: 54px;
+  height: 54px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.badge {
+  border: 1px solid var(--accent-dark);
+  color: var(--accent);
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.tabs {
+  display: flex;
+  overflow-x: auto;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(10, 20, 16, 0.9);
+}
+
+.tabs button {
+  background: var(--bg-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+main {
+  padding: 1rem;
+}
+
+.tab-panel {
+  display: none;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.tab-panel.active {
+  display: grid;
+}
+
+.card {
+  background: rgba(15, 30, 24, 0.7);
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  padding: 1rem;
+}
+
+.card h3 {
+  margin-top: 0;
+  color: var(--accent);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.45rem;
+  text-align: left;
+  font-size: 0.92rem;
+}
+
+input,
+select,
+textarea,
+button {
+  width: 100%;
+  background: #08130f;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+
+button {
+  cursor: pointer;
+  background: linear-gradient(135deg, #12492e, #0d3623);
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+.metric {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.ok {
+  color: var(--accent);
+}
+
+.warn {
+  color: #fbcf66;
+}

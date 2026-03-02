@@ -1,49 +1,62 @@
-# GHG App (MVP estático)
+# GHG App operativa (ElectroGreem)
 
-Aplicación web estática (sin frameworks ni dependencias externas) para un MVP de inventario GHG de ElectroGreem.
+Aplicación web estática (sin frameworks ni dependencias externas) para gestionar inventario GHG con **CRUD completo**, cálculo de emisiones y trazabilidad por evidencias.
 
-## Qué incluye
+## Funcionalidades implementadas
 
-- Interfaz en español con tema oscuro + verde ElectroGreem.
-- Navegación por pestañas:
+- Interfaz en español (Argentina), tema oscuro ElectroGreem.
+- Pestañas operativas:
   - Dashboard
   - Electricidad Scope 2
   - Transporte Scope 3
   - Factores
-  - Evidencias (metadatos)
-  - Control de calidad
+  - Evidencias
   - Reportes
-  - Config
-- Persistencia local con `localStorage`.
-- Precarga de datos demo:
-  - Scope 2 Oct–Dic 2025: `335`, `355`, `392` kWh.
-  - Scope 3: registros `TR-001` y `TR-002`.
-- Simulación de tiempo real para Scope 2 (potencia y energía estimada) y botón placeholder para sincronización ESP32.
+- **Scope 2 (Electricidad):** alta, edición y eliminación de registros; cálculo de emisiones en tCO2e usando factor en tCO2e/MWh (kWh → MWh).
+- **Scope 3 (Transporte):** alta, edición y eliminación de servicios/remitos; cálculo automático de `km_total`; cálculo por método `combustible` o `tkm`.
+- **Evidencias:** alta, edición y eliminación de metadatos; vinculación por IDs separados por coma; estado de evidencia `OK/Falta` reflejado en Scope 2/3 en tiempo real.
+- **Dashboard:** contadores y totales construidos desde los registros reales.
+- **Persistencia total en `localStorage`.**
+- **Reportes / respaldo:**
+  - Export CSV actividad
+  - Export CSV evidencias
+  - Export JSON (backup completo)
+  - Import JSON (restaurar)
+  - Borrar todo
+  - Restablecer demo
+- Datos demo precargados y completamente editables/eliminables.
+
+## Reglas de cálculo
+
+### Scope 2
+
+- Emisiones: `tCO2e = (kWh / 1000) * factor_tCO2e_MWh`
+
+### Scope 3
+
+- `km_total = km_ida_vacio + km_vuelta_carga`
+- Si método `combustible` y litros vacío: `litros = km_total / rendimiento_km_l`
+- Si método `tkm`: `tkm = (carga_kg / 1000) * km_vuelta_carga`
+- Emisiones:
+  - Combustible: `tCO2e = (litros * factor_kgCO2e_L) / 1000`
+  - tkm: `tCO2e = (tkm * factor_kgCO2e_tkm) / 1000`
 
 ## Ejecución
 
 No requiere build.
 
-1. Abre `index.html` directamente en el navegador, **o**
-2. Levanta un servidor local:
+1. Abrir `index.html` directamente, **o**
+2. Levantar servidor local:
 
 ```bash
 cd ghg-app
 python3 -m http.server 8000
 ```
 
-Luego visita: `http://localhost:8000`
+Luego visitar: `http://localhost:8000`
 
 ## Estructura
 
-- `index.html`: layout principal + pestañas.
-- `styles.css`: tema visual.
-- `app.js`: estado, render, simulación, persistencia.
-
-## Próximos pasos sugeridos
-
-1. Conectar botón ESP32 a endpoint real (MQTT/HTTP) para telemetría de kWh.
-2. Agregar carga/edición de registros Scope 3 y evidencias desde UI.
-3. Implementar cálculo de emisiones (kgCO₂e) por factores versionados.
-4. Añadir exportación real de reportes (CSV/PDF) y firma de QA.
-5. Preparar backend/API para sincronización multiusuario y auditoría.
+- `index.html`: layout y pestañas.
+- `styles.css`: estilos de UI.
+- `app.js`: estado, CRUD, cálculos, evidencias, export/import y persistencia.

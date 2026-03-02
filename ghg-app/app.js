@@ -124,7 +124,8 @@ function startRealtimeSimulation() {
   let energy = 0;
   setInterval(() => {
     const power = (Math.random() * 8 + 12).toFixed(2);
-    energy += Number(power) / 60;
+    // kWh = kW * (1 s / 3600 s/h) for 1-second simulation ticks
+    energy += Number(power) / 3600;
     const p = document.getElementById("rt-power");
     const e = document.getElementById("rt-energy");
     if (p) p.textContent = power;

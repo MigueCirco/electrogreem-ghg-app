@@ -38,6 +38,9 @@ button{background:var(--olive);border-color:var(--olive);color:#fff;cursor:point
 button.secondary{background:var(--brown);border-color:var(--brown)}
 button.danger{background:var(--bad);border-color:var(--bad)}
 .btn-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem}
+.button-like{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;width:100%;border:1px solid var(--olive);border-radius:9px;padding:.45rem .55rem;background:var(--olive);color:#fff;font-weight:600}
+.button-like.secondary{background:var(--brown);border-color:var(--brown)}
+.evidence-actions{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
 .table-wrap{overflow:auto}
 table{width:100%;border-collapse:collapse;background:#fff}th,td{border:1px solid var(--border);padding:.45rem;vertical-align:top;font-size:.88rem}th{background:#f6eadb}
 .actions{display:flex;gap:.3rem}.actions button{font-size:.8rem;padding:.3rem .45rem}

@@ -1,4 +1,5 @@
 const STORAGE_KEY = "electrogreem-ghg-v2";
+const THEME_KEY = "electrogreem-theme";
 
 const tabs = [
   ["dashboard", "Dashboard"],
@@ -6,7 +7,8 @@ const tabs = [
   ["scope3", "Transporte Scope 3"],
   ["factores", "Factores"],
   ["evidencias", "Evidencias"],
-  ["reportes", "Reportes"]
+  ["reportes", "Reportes"],
+  ["config", "Configuración"]
 ];
 
 let state = loadState();
@@ -14,9 +16,22 @@ let state = loadState();
 const tabContainer = document.getElementById("tabs");
 const panels = [...document.querySelectorAll(".tab-panel")];
 
+applyTheme(loadThemePreference());
 renderTabs();
 renderAll();
 activateTab("dashboard");
+
+
+function loadThemePreference() {
+  const savedTheme = localStorage.getItem(THEME_KEY);
+  return savedTheme === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = normalized;
+  localStorage.setItem(THEME_KEY, normalized);
+}
 
 function initialState() {
   return {
@@ -160,6 +175,7 @@ function renderAll() {
   renderFactores();
   renderEvidencias();
   renderReportes();
+  renderConfig();
   saveState();
 }
 
@@ -516,4 +532,25 @@ function renderReportes() {
     state = initialState();
     renderAll();
   };
+}
+
+
+function renderConfig() {
+  const el = panel("config");
+  const selectedTheme = loadThemePreference();
+
+  el.innerHTML = `
+    <article class="card full">
+      <h3>Configuración visual</h3>
+      <p>Seleccione un tema de interfaz sobrio para trabajo operativo y auditoría.</p>
+      <div class="theme-option">
+        <label for="theme-select">Tema</label>
+        <select id="theme-select" aria-label="Selector de tema">
+          <option value="light" ${selectedTheme === "light" ? "selected" : ""}>Claro (tierra)</option>
+          <option value="dark" ${selectedTheme === "dark" ? "selected" : ""}>Oscuro sobrio</option>
+        </select>
+      </div>
+    </article>`;
+
+  document.getElementById("theme-select").onchange = (e) => applyTheme(e.target.value);
 }

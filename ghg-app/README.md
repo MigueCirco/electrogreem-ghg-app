@@ -43,3 +43,27 @@ Abrir: `http://localhost:8000`
 - `index.html`: pestañas, layout y librerías JSZip/jsPDF.
 - `styles.css`: estilo sobrio tierra/crema/verde + toasts.
 - `app.js`: estado, cálculos, CRUD, evidencias, hash, backup/restore, reportes y self-check.
+
+
+## Cómo generar informe PDF
+
+1. Ir a la pestaña **Reportes**.
+2. En el bloque **Informe PDF (auditoría)**, seleccionar **Desde** y **Hasta**.
+3. Hacer click en **Generar informe PDF**.
+4. Se descarga automáticamente con formato:
+   `ElectroGreem_Informe_GEI_<YYYY-MM-DD>_<desde>_a_<hasta>.pdf`.
+
+El informe incluye portada, autores/supervisión, alcance, supuestos, metodología, resultados por scope, tabla de registros y trazabilidad de evidencias.
+
+## Qué incluye Scope 1
+
+La pestaña **Emisiones directas (Scope 1)** incluye CRUD para dos fuentes:
+
+- **Refrigerante (recarga/fuga de AA)**
+  - Campos: fecha, equipo/ubicación, tipo refrigerante (R410A, R32, R134a, R22, Otro), kg recargados, GWP auto+editable, evidencia y notas.
+  - Fórmula: `tCO2e = (kg * GWP) / 1000`.
+- **Combustible (equipos propios: podadora 2T / nafta / diésel)**
+  - Campos: fecha, equipo, tipo combustible (nafta, diésel, mezcla 2T), litros, factor kgCO2e/L editable, evidencia y notas.
+  - Fórmula: `tCO2e = (litros * factor) / 1000`.
+
+Los resultados de Scope 1 se integran en Dashboard y en los totales generales/reportes.

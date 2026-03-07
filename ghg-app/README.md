@@ -21,6 +21,7 @@ Aplicación web estática (sin frameworks ni dependencias externas) para gestion
   - Export CSV actividad
   - Export CSV evidencias
   - Export JSON (backup completo)
+  - Imprimir reporte PDF con portada, sección de créditos y pie de página de autoría
   - Import JSON (restaurar)
   - Borrar todo
   - Restablecer demo
@@ -60,3 +61,11 @@ Luego visitar: `http://localhost:8000`
 - `index.html`: layout y pestañas.
 - `styles.css`: estilos de UI.
 - `app.js`: estado, CRUD, cálculos, evidencias, export/import y persistencia.
+
+
+## Créditos y autoría
+
+- **Aplicación:** ElectroGreem – Inventario GHG
+- **Autor:** Héctor Miguel Fadel
+- **Contexto:** Práctica Profesional Supervisada (PPS) de Ingeniería Electrónica
+- **Tutor académico:** Prof. Ing. Ramón Oris

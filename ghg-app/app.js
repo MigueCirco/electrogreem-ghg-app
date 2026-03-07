@@ -44,8 +44,14 @@ function normalizeEvidence(ev = {}) {
     hash: ev.hash || "",
     fecha_documento: ev.fecha_documento || "",
     url: ev.url || "",
+    url_view: ev.url_view || ev.url || "",
+    url_download: ev.url_download || "",
+    drive_file_id: ev.drive_file_id || "",
     alcance: ev.alcance || "",
-    proveedor: ev.proveedor || ""
+    proveedor: ev.proveedor || "",
+    periodo_desde: ev.periodo_desde || "",
+    periodo_hasta: ev.periodo_hasta || "",
+    nota_auditoria: ev.nota_auditoria || ""
   };
 }
 
@@ -85,14 +91,45 @@ function saveState() {
 function ensureFacturaEvidence(url = "") {
   let evidence = state.evidencias.find((e) => e.id === FACTURA_EVIDENCE_ID);
   if (!evidence) {
-    evidence = normalizeEvidence({ id: FACTURA_EVIDENCE_ID, tipo: "Factura electricidad", alcance: "Scope 2", proveedor: "EDET", archivo_nombre: "Factura EDET histórico", hash: "manual-demo", fecha_documento: "", url });
+    evidence = normalizeEvidence({ id: FACTURA_EVIDENCE_ID, tipo: "Factura electricidad", alcance: "S2", proveedor: "EDET", archivo_nombre: "Factura EDET histórico", hash: "manual-demo", fecha_documento: "", url_view: url, url });
     state.evidencias.push(evidence);
   }
   evidence.tipo = "Factura electricidad";
-  evidence.alcance = "Scope 2";
+  evidence.alcance = "S2";
   evidence.proveedor = "EDET";
-  evidence.url = url || evidence.url || "";
+  evidence.url_view = url || evidence.url_view || "";
+  evidence.url = evidence.url_view;
   return evidence;
+}
+
+const DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1LVuZj4sFhr69umi6PLr_DQynFUYqH8OL?usp=drive_link";
+const DRIVE_WARNING = "Asegurarse que el archivo tenga permiso ‘Cualquiera con el enlace - Lector’";
+
+function extractDriveFileId(link = "") {
+  const value = link.trim();
+  if (!value) return "";
+  const match = value.match(/\/file\/d\/([^/]+)/i);
+  if (match?.[1]) return match[1];
+  const altMatch = value.match(/[?&]id=([^&]+)/i);
+  return altMatch?.[1] || "";
+}
+
+function buildDriveLinks(fileId = "") {
+  if (!fileId) return { view: "", download: "" };
+  return {
+    view: `https://drive.google.com/file/d/${fileId}/view?usp=sharing`,
+    download: `https://drive.google.com/uc?export=download&id=${fileId}`
+  };
+}
+
+async function validateEvidenceUrl(url) {
+  if (!url) return null;
+  try {
+    const response = await fetch(url, { method: "HEAD", mode: "cors" });
+    return response.ok;
+  } catch {
+    return null;
+  }
 }
 
 function buildMonthlySequence(totalMonths) {
@@ -258,7 +295,10 @@ function importEvidenceCsv(text) {
     archivo_nombre: headers.indexOf("archivo"),
     hash: headers.indexOf("hash"),
     fecha_documento: headers.indexOf("fecha"),
-    url: headers.indexOf("url")
+    url: headers.indexOf("url"),
+    drive_file_id: headers.indexOf("drive_file_id"),
+    url_view: headers.indexOf("url_view"),
+    url_download: headers.indexOf("url_download")
   };
   let imported = 0;
   lines.slice(1).forEach((line) => {
@@ -269,7 +309,10 @@ function importEvidenceCsv(text) {
       archivo_nombre: idx.archivo_nombre >= 0 ? cells[idx.archivo_nombre] : "",
       hash: idx.hash >= 0 ? cells[idx.hash] : "",
       fecha_documento: idx.fecha_documento >= 0 ? cells[idx.fecha_documento] : "",
-      url: idx.url >= 0 ? cells[idx.url] : ""
+      url: idx.url >= 0 ? cells[idx.url] : "",
+      drive_file_id: idx.drive_file_id >= 0 ? cells[idx.drive_file_id] : "",
+      url_view: idx.url_view >= 0 ? cells[idx.url_view] : "",
+      url_download: idx.url_download >= 0 ? cells[idx.url_download] : ""
     };
     if (!row.id) return;
     const existing = state.evidencias.find((e) => e.id === row.id);
@@ -287,22 +330,70 @@ function renderFactores() {
 
 function renderEvidencias() {
   const facturaEvidence = ensureFacturaEvidence();
-  panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias</h3><div class="grid-form"><label>Tipo<input id="ev-tipo"></label><label>Fecha<input type="date" id="ev-fecha"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">URL<input id="ev-url" placeholder="https://..."></label><label class="span-2">Vincular a registro<select id="ev-link"><option value="">(opcional)</option>${allRecords().map((r) => `<option value="${r.id}">${r.id}</option>`).join("")}</select></label><button type="button" id="save-ev">Guardar evidencia</button></div></article><article class="card full"><h4>Evidencia demo factura EDET</h4><div class="grid-form"><label class="span-2">URL editable<input id="factura-edet-url" value="${facturaEvidence.url || ""}" placeholder="https://..."></label><button type="button" id="save-factura-edet-url">Guardar URL factura EDET</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Archivo</th><th>Hash</th><th>Fecha</th><th>URL</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => `<tr><td>${e.id}</td><td>${e.tipo}</td><td>${e.archivo_nombre}</td><td>${(e.hash || "").slice(0, 14)}...</td><td>${e.fecha_documento || "-"}</td><td>${e.url ? `<a href="${e.url}" target="_blank" rel="noopener">Ver</a>` : "Sin enlace"}</td><td>${linkedRecordsByEvidenceId(e.id).join(",") || "Sin vínculo"}</td><td><button class="danger" data-del="${e.id}">Eliminar</button></td></tr>`).join("") || "<tr><td colspan='8'>Sin evidencias.</td></tr>"}</tbody></table></div></article>`;
-  document.getElementById("save-ev").onclick = async () => {
-    const file = document.getElementById("ev-file").files[0]; if (!file) return showToast("Seleccioná archivo", "error");
-    const ev = normalizeEvidence({ id: `EVD-${String(state.nextIds.evidencia++).padStart(3, "0")}`, tipo: document.getElementById("ev-tipo").value, archivo_nombre: file.name, hash: await hashFile(file), fecha_documento: document.getElementById("ev-fecha").value, url: document.getElementById("ev-url").value.trim() });
-    state.evidencias.push(ev);
-    const link = document.getElementById("ev-link").value; if (link) { const rec = allRecords().find((r) => r.id === link); rec.evidenciaIds = [...new Set([...(rec.evidenciaIds || []), ev.id])]; if (!rec.evidenceId) rec.evidenceId = ev.id; }
-    pushLog(`Alta evidencia ${ev.id}`); renderAll();
+  panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias</h3><div class="grid-form"><label>Tipo<input id="ev-tipo"></label><label>Alcance<select id="ev-alcance"><option value="">(seleccionar)</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option></select></label><label>Período desde<input type="date" id="ev-periodo-desde"></label><label>Período hasta<input type="date" id="ev-periodo-hasta"></label><label>Proveedor / Origen<input id="ev-proveedor" placeholder="Proveedor, entidad o fuente"></label><label>Fecha documento<input type="date" id="ev-fecha"></label><label class="span-2">Nota de auditoría<input id="ev-nota-auditoria" placeholder="Observaciones de trazabilidad"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">Pegar link de Drive<input id="ev-drive-link" placeholder="https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing"></label><label class="span-2">URL vista<input id="ev-url-view" placeholder="https://..."></label><label class="span-2">URL descarga<input id="ev-url-download" placeholder="https://..."></label><label class="span-2">Vincular a registro<select id="ev-link"><option value="">(opcional)</option>${allRecords().map((r) => `<option value="${r.id}">${r.id}</option>`).join("")}</select></label><div class="btn-row span-2"><a class="button-like secondary" href="${DRIVE_FOLDER_URL}" target="_blank" rel="noopener">Subir evidencia a Drive</a><button type="button" id="save-ev">Guardar evidencia</button></div></div></article><article class="card full"><h4>Evidencia demo factura EDET</h4><div class="grid-form"><label class="span-2">URL editable<input id="factura-edet-url" value="${facturaEvidence.url_view || ""}" placeholder="https://..."></label><button type="button" id="save-factura-edet-url">Guardar URL factura EDET</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Alcance</th><th>Periodo</th><th>Proveedor/Origen</th><th>Nota auditoría</th><th>Archivo</th><th>Ver/Descargar</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => {
+    const periodo = e.periodo_desde || e.periodo_hasta ? `${e.periodo_desde || "-"} / ${e.periodo_hasta || "-"}` : "-";
+    const viewAction = e.url_view ? `<a href="${e.url_view}" target="_blank" rel="noopener">Ver</a>` : "Sin evidencia cargada";
+    const downloadAction = e.url_download ? `<a href="${e.url_download}" target="_blank" rel="noopener">Descargar</a>` : "Sin evidencia cargada";
+    return `<tr><td>${e.id}</td><td>${e.tipo || "-"}</td><td>${e.alcance || "-"}</td><td>${periodo}</td><td>${e.proveedor || "-"}</td><td>${e.nota_auditoria || "-"}</td><td>${e.archivo_nombre || "-"}</td><td class="evidence-actions">${viewAction}<span>·</span>${downloadAction}</td><td>${linkedRecordsByEvidenceId(e.id).join(",") || "Sin vínculo"}</td><td><button class="danger" data-del="${e.id}">Eliminar</button></td></tr>`;
+  }).join("") || "<tr><td colspan='10'>Sin evidencias.</td></tr>"}</tbody></table></div></article>`;
+
+  document.getElementById("ev-drive-link").oninput = (event) => {
+    const fileId = extractDriveFileId(event.target.value);
+    if (!fileId) return;
+    const links = buildDriveLinks(fileId);
+    document.getElementById("ev-url-view").value = links.view;
+    document.getElementById("ev-url-download").value = links.download;
   };
+
+  document.getElementById("save-ev").onclick = async () => {
+    const file = document.getElementById("ev-file").files[0];
+    const fileId = extractDriveFileId(document.getElementById("ev-drive-link").value);
+    const existingView = document.getElementById("ev-url-view").value.trim();
+    const existingDownload = document.getElementById("ev-url-download").value.trim();
+    const links = fileId ? buildDriveLinks(fileId) : { view: existingView, download: existingDownload };
+    if (!file && !links.view && !links.download) return showToast("Seleccioná archivo o cargá un link de Drive", "error");
+
+    const validation = await validateEvidenceUrl(links.view || links.download);
+    if (validation !== true) showToast(DRIVE_WARNING, "error");
+
+    const ev = normalizeEvidence({
+      id: `EVD-${String(state.nextIds.evidencia++).padStart(3, "0")}`,
+      tipo: document.getElementById("ev-tipo").value,
+      alcance: document.getElementById("ev-alcance").value,
+      periodo_desde: document.getElementById("ev-periodo-desde").value,
+      periodo_hasta: document.getElementById("ev-periodo-hasta").value,
+      proveedor: document.getElementById("ev-proveedor").value.trim(),
+      nota_auditoria: document.getElementById("ev-nota-auditoria").value.trim(),
+      archivo_nombre: file ? file.name : "Archivo en Drive",
+      hash: file ? await hashFile(file) : "drive-link",
+      fecha_documento: document.getElementById("ev-fecha").value,
+      drive_file_id: fileId,
+      url_view: links.view,
+      url_download: links.download,
+      url: links.view
+    });
+    state.evidencias.push(ev);
+    const link = document.getElementById("ev-link").value;
+    if (link) {
+      const rec = allRecords().find((r) => r.id === link);
+      rec.evidenciaIds = [...new Set([...(rec.evidenciaIds || []), ev.id])];
+      if (!rec.evidenceId) rec.evidenceId = ev.id;
+    }
+    pushLog(`Alta evidencia ${ev.id}`);
+    renderAll();
+  };
+
   document.getElementById("save-factura-edet-url").onclick = () => {
     ensureFacturaEvidence(document.getElementById("factura-edet-url").value.trim());
     pushLog("Actualización URL evidencia factura EDET");
     renderAll();
   };
+
   panel("evidencias").querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
     if (b.dataset.del === FACTURA_EVIDENCE_ID) return showToast("La evidencia demo EDET no se puede eliminar", "error");
-    state.evidencias = state.evidencias.filter((x) => x.id !== b.dataset.del); allRecords().forEach((r) => r.evidenciaIds = (r.evidenciaIds || []).filter((id) => id !== b.dataset.del)); renderAll();
+    state.evidencias = state.evidencias.filter((x) => x.id !== b.dataset.del);
+    allRecords().forEach((r) => r.evidenciaIds = (r.evidenciaIds || []).filter((id) => id !== b.dataset.del));
+    renderAll();
   });
 }
 
@@ -323,8 +414,8 @@ function renderReportes() {
 function exportCsv(periodOnly) {
   const rows = (periodOnly ? [...filterByPeriod(allScope1Records()), ...filterByPeriod(state.scope2), ...filterByPeriod(state.scope3)] : [...allScope1Records(), ...state.scope2, ...state.scope3]).map((r) => [r.id, r.fecha, r.source || r.activity || "", r.input || r.kwh || r.litros || "", r.factor || r.factor_id || "", (r.id.startsWith("S1") ? emissionS1(r) : r.id.startsWith("S2") ? emissionS2(r) : emissionS3(r)).toFixed(4), (r.evidenciaIds || []).join("|")].join(","));
   downloadBlob(["id,fecha,fuente,entrada,factor,tco2e,evidencias", ...rows].join("\n"), "text/csv", `electrogreem-${periodOnly ? "periodo" : "completo"}.csv`);
-  const evidenceRows = state.evidencias.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "", e.url || "", linkedRecordsByEvidenceId(e.id).join("|")].map((v) => `"${String(v).replaceAll('"', '""')}"`).join(","));
-  downloadBlob(["id,tipo,archivo,hash,fecha,url,vinculos", ...evidenceRows].join("\n"), "text/csv", `electrogreem-evidencias-${periodOnly ? "periodo" : "completo"}.csv`);
+  const evidenceRows = state.evidencias.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "", e.url || "", e.drive_file_id || "", e.url_view || "", e.url_download || "", linkedRecordsByEvidenceId(e.id).join("|")].map((v) => `"${String(v).replaceAll('"', '""')}"`).join(","));
+  downloadBlob(["id,tipo,archivo,hash,fecha,url,drive_file_id,url_view,url_download,vinculos", ...evidenceRows].join("\n"), "text/csv", `electrogreem-evidencias-${periodOnly ? "periodo" : "completo"}.csv`);
 }
 function downloadBlob(content, type, filename) { const blob = new Blob([content], { type }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); URL.revokeObjectURL(a.href); }
 
@@ -354,8 +445,18 @@ function generatePdf() {
   y = pdfScopeTable(doc, y, "Scope 3 – Operaciones indirectas", s3, (r) => [fmtDate(r.fecha), r.activity || "-", `${r.litros} L`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS3(r)), (r.evidenciaIds || []).join("|") || "-"]);
 
   doc.autoTable({ startY: y + 3, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Factores utilizados", "Valor", "Unidad"]], body: state.factores.map((f) => [f.id, String(f.valor), f.unidad]) });
-  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: state.evidencias.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", linkedRecordsByEvidenceId(e.id).join("|") || "-"]) });
-  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Registro de cambios", "Acción", "Autor"]], body: state.changelog.slice(0, 20).map((c) => [new Date(c.at).toLocaleString("es-AR"), c.action, c.author]) });
+  const recordsInPeriod = [...s1, ...s2, ...s3];
+  const evidenciasPeriodo = state.evidencias.filter((e) => linkedRecordsByEvidenceId(e.id).some((id) => recordsInPeriod.some((r) => r.id === id)));
+  let sectionY = doc.lastAutoTable.finalY + 4;
+  if (!evidenciasPeriodo.length) {
+    doc.setFontSize(10);
+    doc.text("Sin evidencias para el periodo seleccionado", 14, sectionY + 6);
+    sectionY += 10;
+  } else {
+    doc.autoTable({ startY: sectionY, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: evidenciasPeriodo.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", linkedRecordsByEvidenceId(e.id).join("|") || "-"]) });
+    sectionY = doc.lastAutoTable.finalY + 4;
+  }
+  doc.autoTable({ startY: sectionY, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Registro de cambios", "Acción", "Autor"]], body: state.changelog.slice(0, 20).map((c) => [new Date(c.at).toLocaleString("es-AR"), c.action, c.author]) });
 
   const pages = doc.getNumberOfPages();
   for (let i = 1; i <= pages; i += 1) { doc.setPage(i); doc.setFontSize(8); doc.text(`ElectroGreem · Informe GEI · v${APP_VERSION}`, 14, 8); doc.text(`Generado ${new Date().toLocaleString("es-AR")}`, 14, 292); doc.text(`Página ${i} de ${pages}`, 175, 292); }

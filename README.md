@@ -2,12 +2,11 @@
 
 Aplicación estática publicada en `ghg-app/`.
 
-Incluye versión operativa 1.0 con:
-- Scope 1/2/3 con CRUD,
+Incluye versión operativa con:
+- Scope 1/2/3 con persistencia local,
+- filtro global de período,
 - evidencias con hash SHA-256,
-- backup/restore ZIP,
-- reportes CSV,
-- informe PDF de auditoría,
-- self-check de integridad.
+- export/import JSON y export CSV (completo o por período),
+- informe PDF profesional auditable con secciones por scope.
 
-Ver guía completa en `ghg-app/README.md`.
+Ver guía completa y pruebas rápidas en `ghg-app/README.md`.

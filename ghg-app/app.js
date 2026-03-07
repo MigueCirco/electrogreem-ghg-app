@@ -1,4 +1,10 @@
 const STORAGE_KEY = "electrogreem-ghg-v2";
+const APP_NAME = "ElectroGreem – Inventario GHG";
+const APP_VERSION = "v2";
+const AUTHOR = "Héctor Miguel Fadel";
+const CONTEXT = "Práctica Profesional Supervisada – Ingeniería Electrónica";
+const TUTOR = "Prof. Ing. Ramón Oris";
+const PDF_FOOTER = "ElectroGreem – Inventario GHG | Héctor Miguel Fadel | PPS Ing. Electrónica | Tutor: Prof. Ing. Ramón Oris";
 
 const tabs = [
   ["dashboard", "Dashboard"],
@@ -14,9 +20,22 @@ let state = loadState();
 const tabContainer = document.getElementById("tabs");
 const panels = [...document.querySelectorAll(".tab-panel")];
 
+applyBranding();
 renderTabs();
 renderAll();
 activateTab("dashboard");
+
+
+function applyBranding() {
+  document.title = `${APP_NAME} operativo`;
+  const brandTitle = document.getElementById("brand-title");
+  const brandSubtitle = document.getElementById("brand-subtitle");
+  const brandBadge = document.getElementById("brand-badge");
+
+  if (brandTitle) brandTitle.textContent = APP_NAME;
+  if (brandSubtitle) brandSubtitle.textContent = `${CONTEXT} · Autor: ${AUTHOR}`;
+  if (brandBadge) brandBadge.textContent = `Operativo · Español (AR) · ${APP_VERSION}`;
+}
 
 function initialState() {
   return {
@@ -455,15 +474,102 @@ function toCsv(rows) {
   return rows.map((r) => r.map((c) => `"${String(c ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
 }
 
+
+function reportGenerationDate() {
+  return new Date().toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function summaryRows() {
+  const rows = [];
+  state.scope2.forEach((r) => rows.push(["Scope 2", r.id_registro, r.mes, calcScope2Emission(r).toFixed(3)]));
+  state.scope3.forEach((r) => rows.push(["Scope 3", r.id_servicio, r.fecha, calcScope3(r).emisiones.toFixed(3)]));
+  return rows;
+}
+
+function buildReportPdfHtml() {
+  const generatedAt = reportGenerationDate();
+  const rows = summaryRows()
+    .map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]} tCO2e</td></tr>`)
+    .join("");
+
+  return `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>${APP_NAME} - Reporte PDF</title>
+    <style>
+      @page { margin: 24mm 12mm 20mm 12mm; }
+      body { font-family: Arial, sans-serif; color: #17211a; margin: 0; }
+      .page-break { page-break-before: always; }
+      .cover { min-height: 240mm; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+      h1 { margin: 0; font-size: 30px; }
+      h2 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 0; line-height: 1.4; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border: 1px solid #8ea798; padding: 8px; font-size: 12px; text-align: left; }
+      .footer { position: fixed; bottom: -12mm; left: 0; right: 0; text-align: center; font-size: 10px; color: #445548; }
+      .muted { color: #445548; }
+    </style>
+  </head>
+  <body>
+    <div class="footer">${PDF_FOOTER}</div>
+
+    <section class="cover">
+      <h1>${APP_NAME}</h1>
+      <p><strong>Autor:</strong> ${AUTHOR}</p>
+      <p>${CONTEXT}</p>
+      <p><strong>Tutor académico:</strong> ${TUTOR}</p>
+      <p class="muted">Fecha de generación: ${generatedAt}</p>
+      <p class="muted">Versión de la app: ${APP_VERSION}</p>
+    </section>
+
+    <section class="page-break">
+      <h2>Resumen de emisiones registradas</h2>
+      <table>
+        <thead><tr><th>Alcance</th><th>ID</th><th>Período</th><th>Emisiones</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4">Sin datos cargados.</td></tr>'}</tbody>
+      </table>
+    </section>
+
+    <section class="page-break">
+      <h2>Créditos / Responsables</h2>
+      <p><strong>Aplicación:</strong> ${APP_NAME}</p>
+      <p><strong>Autor:</strong> ${AUTHOR}</p>
+      <p><strong>Contexto:</strong> ${CONTEXT}</p>
+      <p><strong>Tutor académico:</strong> ${TUTOR}</p>
+      <p class="muted">Fecha de generación: ${generatedAt} · Versión: ${APP_VERSION}</p>
+    </section>
+  </body>
+</html>`;
+}
+
+function exportPdfReport() {
+  const html = buildReportPdfHtml();
+  const win = window.open("", "_blank");
+  if (!win) return alert("No se pudo abrir la vista de impresión. Habilite ventanas emergentes.");
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 250);
+}
+
 function renderReportes() {
   const el = panel("reportes");
   el.innerHTML = `
     <article class="card full">
       <h3>Exportación e importación</h3>
+      <p><strong>Créditos:</strong> Autor: ${AUTHOR} · ${CONTEXT} · Tutor académico: ${TUTOR}</p>
       <div class="btn-row">
         <button id="csv-actividad">Export CSV actividad</button>
         <button id="csv-evidencias">Export CSV evidencias</button>
         <button id="json-export">Export JSON (backup completo)</button>
+        <button id="pdf-report">Imprimir reporte PDF</button>
       </div>
       <div class="btn-row">
         <input id="json-import-file" type="file" accept="application/json" />
@@ -490,6 +596,10 @@ function renderReportes() {
 
   document.getElementById("json-export").onclick = () => {
     downloadFile("backup_ghg.json", JSON.stringify(state, null, 2), "application/json");
+  };
+
+  document.getElementById("pdf-report").onclick = () => {
+    exportPdfReport();
   };
 
   document.getElementById("json-import").onclick = async () => {

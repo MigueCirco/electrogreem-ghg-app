@@ -28,8 +28,9 @@ function initialState() {
     meta: { appVersion: APP_VERSION, createdAt: now, factorsVersion: "v1", factorsUpdatedAt: now },
     nextIds: { s1r: 1, s1f: 1, scope2: 1, scope3: 1, evidencia: 1 },
     factores: [
-      { id: "FE-S2-AR", alcance: "scope2", nombre: "Electricidad red AR", valor: 0.32, unidad: "tCO2e/MWh" },
+      { id: "FE-S2-AR", alcance: "scope2", nombre: "Electricidad red AR", valor: 0.32, unidad: "kgCO2e/kWh" },
       { id: "FE-S3-DIESEL", alcance: "scope3", nombre: "Transporte diésel", valor: 2.68, unidad: "kgCO2e/L" },
+      { id: "FE-S3-TKM", alcance: "scope3", nombre: "Transporte por tkm", valor: 0.12, unidad: "kgCO2e/tkm" },
       { id: "GWP-R410A", alcance: "scope1", nombre: "R-410A", valor: 2088, unidad: "GWP" },
       { id: "GWP-R134a", alcance: "scope1", nombre: "R-134a", valor: 1430, unidad: "GWP" },
       { id: "GWP-R32", alcance: "scope1", nombre: "R-32", valor: 675, unidad: "GWP" },
@@ -41,7 +42,12 @@ function initialState() {
     evidencias: [],
     changelog: [{ at: now, action: "Inicialización", author: "Sistema" }],
     globalPeriod: { from: "", to: "" },
-    auditorMode: false
+    auditorMode: false,
+    importDiagnostics: {
+      scope1: { headers: [], mapping: {}, nulls: { cantidad: 0, refrigerante_kg: 0 } },
+      scope2: { headers: [], mapping: {}, nulls: { kwh: 0 } },
+      scope3: { headers: [], mapping: {}, nulls: { combustible_l: 0, tkm: 0 } }
+    }
   };
 }
 
@@ -73,6 +79,7 @@ function normalizeLoadedState(rawState) {
   merged.scope2 = (merged.scope2 || []).map((r) => ({ ...r, evidenciaIds: r.evidenciaIds || (r.evidenceId ? [r.evidenceId] : []) }));
   merged.scope3 = (merged.scope3 || []).map((r) => ({ ...r, evidenciaIds: r.evidenciaIds || [] }));
   merged.evidencias = (merged.evidencias || []).map((e) => normalizeEvidence(e));
+  merged.importDiagnostics = merged.importDiagnostics || initialState().importDiagnostics;
   return merged;
 }
 
@@ -180,15 +187,56 @@ function showToast(message, type = "success") { const node = document.createElem
 function normalizeDate(v) { if (!v) return ""; return /^\d{4}-\d{2}$/.test(v) ? `${v}-01` : v; }
 function fmtDate(v) { return normalizeDate(v) ? new Date(normalizeDate(v)).toLocaleDateString("es-AR") : "-"; }
 function t4(n) { return Number(n || 0).toFixed(4); }
-function hasEvidence(r) { return (r.evidenciaIds || []).length > 0; }
+function formatEmission(value) { return value === null ? "Dato faltante" : t4(value); }
+function hasEvidence(r) {
+  if (String(r.evidenceUrl || "").trim()) return true;
+  return (r.evidenciaIds || []).some((id) => {
+    const ev = state.evidencias.find((e) => e.id === id);
+    return Boolean(String(ev?.url_view || ev?.url || "").trim());
+  });
+}
 function allAlcance1Records() { return [...state.scope1.refrigerants.map((r) => ({ ...r, kind: "refrigerant" })), ...state.scope1.fuels.map((r) => ({ ...r, kind: "fuel" }))]; }
 function allRecords() { return [...allAlcance1Records(), ...state.scope2.map((r) => ({ ...r, scope: "scope2" })), ...state.scope3.map((r) => ({ ...r, scope: "scope3" }))]; }
 
-function emissionS1(r) { return (Number(r.input || 0) * Number(r.factor || 0)) / 1000; }
-function emissionS2(r) { return (Number(r.kwh || 0) / 1000) * Number(factorById(r.factor_id)?.valor || 0); }
+function emissionS1(r) {
+  const input = r.input;
+  if (input === null || input === undefined) return null;
+  if (r.kind === "refrigerant" || r.refType || r.sourceType === "refrigerant") {
+    const gwp = r.factor;
+    if (gwp === null || gwp === undefined) return null;
+    return (Number(input) * Number(gwp)) / 1000;
+  }
+  const factor = r.factor;
+  if (factor === null || factor === undefined) return null;
+  return (Number(input) * Number(factor)) / 1000;
+}
+function emissionS2(r) {
+  if (r.kwh === null || r.kwh === undefined) return null;
+  const factorKg = Number(factorById(r.factor_id)?.valor || 0);
+  return (Number(r.kwh) * factorKg) / 1000;
+}
 function emissionS3(r) {
-  if (Number(r.tkm || 0) > 0 && r.metrica?.toLowerCase() === "tkm") return Number(r.tkm || 0) / 1000;
-  return (Number(r.litros || 0) * Number(factorById(r.factor_id)?.valor || 0)) / 1000;
+  if (r.combustible_l !== null && r.combustible_l !== undefined) {
+    const factorFuel = Number(r.fuelFactor || factorById(r.factor_id)?.valor || 0);
+    return (Number(r.combustible_l) * factorFuel) / 1000;
+  }
+  if (r.tkm !== null && r.tkm !== undefined) {
+    const factorTkm = Number(r.transportFactor || factorById(r.factor_id)?.valor || 0);
+    if (!factorTkm) return null;
+    return (Number(r.tkm) * factorTkm) / 1000;
+  }
+  return null;
+}
+
+function sumValidEmissions(records, emissionFn) {
+  return records.reduce((acc, record) => {
+    const emission = emissionFn(record);
+    return emission === null ? acc : acc + emission;
+  }, 0);
+}
+
+function hasEmission(record, emissionFn) {
+  return emissionFn(record) !== null;
 }
 
 function filterByPeriod(records) {
@@ -231,9 +279,16 @@ function renderInicio() {
   const s1 = filterByPeriod(allAlcance1Records());
   const s2 = filterByPeriod(state.scope2);
   const s3 = filterByPeriod(state.scope3);
-  const t1 = s1.reduce((a, r) => a + emissionS1(r), 0); const t2 = s2.reduce((a, r) => a + emissionS2(r), 0); const t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
-  const pending = [["Alcance 1 (Directo)", s1], ["Alcance 2 (Electricidad)", s2], ["Alcance 3 (Indirecto: Transporte y otros)", s3]].map(([n, r]) => `<li>${n}: faltan evidencias en ${r.filter((x) => !hasEvidence(x)).length} registros.</li>`).join("");
-  panel("inicio").innerHTML = `<article class="card full"><h3>ElectroGreem GHG App · Inicio / Instructivo</h3><p><b>Autor:</b> Héctor Miguel Fadel · <b>Contexto:</b> Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT) · <b>Tutor/Supervisión:</b> Prof. Ing. Ramón Oris · <b>Agradecimientos:</b> Búho Producciones Artísticas.</p><p>Esta app estática permite inventario GEI operativo de Alcance 1/2/3 con trazabilidad por evidencias, registro de cambios y respaldo JSON/CSV.</p><h4>Supuestos y límites</h4><ul><li>Depende de datos de actividad y factores cargados por el usuario.</li><li>Límites organizacionales: operaciones y activos declarados.</li><li>La ausencia de datos no implica ausencia de emisiones.</li></ul><h4>Validez</h4><ul><li>Trazabilidad mediante evidencias con hash.</li><li>Registro de cambios y versión de factores.</li><li>Exportar/Importar JSON y export CSV como respaldo auditable.</li></ul><h4>Mini guía</h4><ol><li>Cargar factores.</li><li>Cargar actividades de Alcance 1/2/3.</li><li>Adjuntar evidencias.</li><li>Elegir período global.</li><li>Generar informe PDF.</li></ol></article><article class="card"><h3>Total</h3><div class="metric">${t4(t1 + t2 + t3)} tCO2e</div></article><article class="card"><h3>Alcance 1 (Directo)</h3><div class="metric">${t4(t1)}</div><p>${s1.length} registros · cobertura ${coverage(s1).toFixed(1)}%</p></article><article class="card"><h3>Alcance 2 (Electricidad)</h3><div class="metric">${t4(t2)}</div><p>${s2.length} registros · cobertura ${coverage(s2).toFixed(1)}%</p></article><article class="card"><h3>Alcance 3 (Indirecto: Transporte y otros)</h3><div class="metric">${t4(t3)}</div><p>${s3.length} registros · cobertura ${coverage(s3).toFixed(1)}%</p></article><article class="card full"><h3>Pendientes de datos</h3><ul>${pending}</ul></article>`;
+  const t1 = sumValidEmissions(s1, emissionS1); const t2 = sumValidEmissions(s2, emissionS2); const t3 = sumValidEmissions(s3, emissionS3);
+  const emptyScope = (records, fn) => !records.length || records.every((r) => !hasEmission(r, fn));
+  const noData = "Sin datos en el período";
+  const coverageText = (records) => `${records.length} registros · cobertura ${coverage(records).toFixed(1)}%`;
+  const pending = [["Alcance 1 (Directo)", s1, emissionS1], ["Alcance 2 (Electricidad)", s2, emissionS2], ["Alcance 3 (Indirecto: Transporte y otros)", s3, emissionS3]].map(([n, records, fn]) => {
+    const missingValues = records.filter((r) => !hasEmission(r, fn)).length;
+    const missingEvidence = records.filter((r) => !hasEvidence(r)).length;
+    return `<li>${n}: a) faltan valores (${missingValues}) · b) faltan evidencias (${missingEvidence}).</li>`;
+  }).join("");
+  panel("inicio").innerHTML = `<article class="card full"><h3>ElectroGreem GHG App · Inicio / Instructivo</h3><p><b>Autor:</b> Héctor Miguel Fadel · <b>Contexto:</b> Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT) · <b>Tutor/Supervisión:</b> Prof. Ing. Ramón Oris · <b>Agradecimientos:</b> Búho Producciones Artísticas.</p><p>Esta app estática permite inventario GEI operativo de Alcance 1/2/3 con trazabilidad por evidencias, registro de cambios y respaldo JSON/CSV.</p><h4>Supuestos y límites</h4><ul><li>Depende de datos de actividad y factores cargados por el usuario.</li><li>Límites organizacionales: operaciones y activos declarados.</li><li>La ausencia de datos no implica ausencia de emisiones.</li></ul><h4>Validez</h4><ul><li>Trazabilidad mediante evidencias con hash.</li><li>Registro de cambios y versión de factores.</li><li>Exportar/Importar JSON y export CSV como respaldo auditable.</li></ul><h4>Mini guía</h4><ol><li>Cargar factores.</li><li>Cargar actividades de Alcance 1/2/3.</li><li>Adjuntar evidencias.</li><li>Elegir período global.</li><li>Generar informe PDF.</li></ol></article><article class="card"><h3>Total</h3><div class="metric">${t4(t1 + t2 + t3)} tCO2e</div></article><article class="card"><h3>Alcance 1 (Directo)</h3><div class="metric">${t4(t1)}</div><p>${emptyScope(s1, emissionS1) ? noData : coverageText(s1)}</p></article><article class="card"><h3>Alcance 2 (Electricidad)</h3><div class="metric">${t4(t2)}</div><p>${emptyScope(s2, emissionS2) ? noData : coverageText(s2)}</p></article><article class="card"><h3>Alcance 3 (Indirecto: Transporte y otros)</h3><div class="metric">${t4(t3)}</div><p>${emptyScope(s3, emissionS3) ? noData : coverageText(s3)}</p></article><article class="card full"><h3>Pendientes de datos</h3><ul>${pending}</ul></article>`;
 }
 
 function evidenceSelectorHtml(selected = []) { if (!state.evidencias.length) return "<small>Sin evidencias cargadas.</small>"; return `<div class="evidence-links">${state.evidencias.map((ev) => `<label><input type="checkbox" value="${ev.id}" name="evidenciaIds" ${selected.includes(ev.id) ? "checked" : ""}>${ev.id} · ${ev.archivo_nombre}</label>`).join("")}</div>`; }
@@ -243,8 +298,8 @@ function renderAlcance1() {
   const el = panel("scope1"); const gwp = ["GWP-R410A", "GWP-R134a", "GWP-R32"]; const fuelEF = factorById("FE-S1-MEZCLA2T")?.valor || 2.31;
   const ref = filterByPeriod(state.scope1.refrigerants); const fuel = filterByPeriod(state.scope1.fuels);
   const auditorCols = state.auditorMode ? "<th>Factor ID</th><th>Timestamp</th>" : "";
-  const refRows = ref.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.source}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "manual"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="refrigerants" class="danger">Eliminar</button></td></tr>`).join("");
-  const fuelRows = fuel.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "FE-S1-MEZCLA2T"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="fuels" class="danger">Eliminar</button></td></tr>`).join("");
+  const refRows = ref.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.source}</td><td>${r.input}</td><td>${r.factor}</td><td>${formatEmission(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "manual"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="refrigerants" class="danger">Eliminar</button></td></tr>`).join("");
+  const fuelRows = fuel.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity}</td><td>${r.input}</td><td>${r.factor}</td><td>${formatEmission(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "FE-S1-MEZCLA2T"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="fuels" class="danger">Eliminar</button></td></tr>`).join("");
   el.innerHTML = `<article class="card full"><h3>Alcance 1 (Directo) – Emisiones directas</h3><div class="btn-row"><button type="button" class="secondary" id="imp-s1-csv">Importar CSV</button><input id="imp-s1-file" type="file" accept=".csv,text/csv"></div><div class="grid-form"><label>Fecha<input type="date" id="s1r-fecha"></label><label>Equipo/Ubicación<input id="s1r-source"></label><label>Refrigerante<select id="s1r-type"><option value="GWP-R410A">R-410A</option><option value="GWP-R134a">R-134a</option><option value="GWP-R32">R-32</option><option value="OTRO">Otro</option></select></label><label>Kg recargados<input type="number" id="s1r-input" step="0.01"></label><label>GWP<input type="number" id="s1r-factor" step="0.01"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1r-notes"></label><button type="button" id="save-s1r">Guardar refrigerante</button></div><hr><div class="grid-form"><label>Fecha<input type="date" id="s1f-fecha"></label><label>Equipo/Actividad<input id="s1f-activity" value="Podadora"></label><label>Litros consumidos<input type="number" id="s1f-input" step="0.01"></label><label>EF kgCO2e/L<input type="number" id="s1f-factor" step="0.001" value="${fuelEF}"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1f-notes"></label><button type="button" id="save-s1f">Guardar combustible</button></div></article><article class="card full"><h3>Refrigerantes</h3>${showNoDataBanner(ref)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Fuente</th><th>Entrada kg</th><th>GWP</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${refRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article><article class="card full"><h3>Combustible</h3>${showNoDataBanner(fuel)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Actividad</th><th>Entrada L</th><th>EF</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${fuelRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article>`;
   const typeSel = document.getElementById("s1r-type"); const factorInput = document.getElementById("s1r-factor"); const setGwp = () => { if (typeSel.value !== "OTRO") factorInput.value = factorById(typeSel.value)?.valor || ""; }; typeSel.onchange = setGwp; setGwp();
   document.getElementById("save-s1r").onclick = () => {
@@ -266,9 +321,9 @@ function renderSimpleAlcance(tab, label, idPrefix) {
   const factorOpts = state.factores.filter((f) => f.alcance === tab).map((f) => `<option value="${f.id}">${f.nombre} (${f.valor})</option>`).join("");
   const rows = filtered.map((r) => {
     const quality = tab === "scope2" && r.dataQuality === "Estimado" ? '<span class="pill alerta">Dato estimado / con supuestos</span>' : "-";
-    const dato = tab === "scope2" ? `${r.kwh} kWh` : (r.tkm ? `${r.tkm} tkm` : `${r.litros || 0} L`);
+    const dato = tab === "scope2" ? `${r.kwh ?? "-"} kWh` : (r.combustible_l !== null && r.combustible_l !== undefined ? `${r.combustible_l} L` : (r.tkm !== null && r.tkm !== undefined ? `${r.tkm} tkm` : "Dato faltante"));
     const periodo = tab === "scope2" && (r.periodStart || r.periodEnd) ? `${fmtDate(r.periodStart)} → ${fmtDate(r.periodEnd)}` : fmtDate(r.fecha);
-    return `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${periodo}</td><td>${dato}</td><td>${tab === "scope2" ? t4(emissionS2(r)) : t4(emissionS3(r))}</td><td>${quality}</td><td>${tab === "scope2" ? (r.assumptions || "-") : (r.assumptions || "-")}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.updatedAt || "-"}</td>` : ""}<td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`;
+    return `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${periodo}</td><td>${dato}</td><td>${tab === "scope2" ? formatEmission(emissionS2(r)) : formatEmission(emissionS3(r))}</td><td>${quality}</td><td>${tab === "scope2" ? (r.assumptions || "-") : (r.assumptions || "-")}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.updatedAt || "-"}</td>` : ""}<td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`;
   }).join("");
   const dataQualityInput = tab === "scope2" ? `<label>Calidad de dato<select id="s2-quality"><option value="Medido">Medido</option><option value="Estimado">Estimado</option></select></label>` : "";
   const assumptionsInput = tab === "scope2" ? `<label class="span-2">Supuestos<input id="s2-assumptions" placeholder="Detalle de supuestos"></label>` : "";
@@ -278,8 +333,8 @@ function renderSimpleAlcance(tab, label, idPrefix) {
   panel(tab).innerHTML = `<article class="card full"><h3>${label}</h3>${importControls}<div class="grid-form"><label>Fecha<input type="${tab === "scope2" ? "month" : "date"}" id="${idPrefix}-fecha"></label><label>${tab === "scope2" ? "kWh" : "Actividad"}<input id="${idPrefix}-${tab === "scope2" ? "kwh" : "activity"}"></label>${tab === "scope3" ? "<label>Litros<input type='number' id='s3-litros'></label><label>tkm (opcional)<input type='number' id='s3-tkm' step='0.01'></label>" : ""}${sourceInput}${dataQualityInput}${assumptionsInput}<label>Factor<select id="${idPrefix}-factor">${factorOpts}</select></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><button id="save-${idPrefix}" type="button">Guardar</button></div>${demoActions}</article><article class="card full">${showNoDataBanner(filtered)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha/Período</th><th>Dato</th><th>tCO2e</th><th>Calidad</th><th>Supuestos</th><th>Evidencias</th>${state.auditorMode ? "<th>Timestamp</th>" : ""}<th>Acciones</th></tr></thead><tbody>${rows || "<tr><td colspan='11'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article>`;
   document.getElementById(`save-${idPrefix}`).onclick = () => {
     const form = panel(tab).querySelector(".grid-form"); const ev = [...form.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
-    if (tab === "scope2") scopeArr.push({ id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, fecha: document.getElementById("s2-fecha").value, kwh: Number(document.getElementById("s2-kwh").value), source: document.getElementById("s2-source")?.value || "", dataQuality: document.getElementById("s2-quality")?.value || "Medido", assumptions: document.getElementById("s2-assumptions")?.value || "", evidenceId: ev[0] || "", factor_id: document.getElementById("s2-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
-    if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, litros: Number(document.getElementById("s3-litros").value), tkm: Number(document.getElementById("s3-tkm")?.value || 0), metrica: Number(document.getElementById("s3-tkm")?.value || 0) > 0 ? "tkm" : "litros", factor_id: document.getElementById("s3-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
+    if (tab === "scope2") scopeArr.push({ id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, fecha: document.getElementById("s2-fecha").value, kwh: parseNumber(document.getElementById("s2-kwh").value), source: document.getElementById("s2-source")?.value || "", dataQuality: document.getElementById("s2-quality")?.value || "Medido", assumptions: document.getElementById("s2-assumptions")?.value || "", evidenceId: ev[0] || "", factor_id: document.getElementById("s2-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
+    if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, combustible_l: parseNumber(document.getElementById("s3-litros").value), litros: parseNumber(document.getElementById("s3-litros").value), tkm: parseNumber(document.getElementById("s3-tkm")?.value || ""), metrica: parseNumber(document.getElementById("s3-tkm")?.value || "") !== null ? "tkm" : "litros", factor_id: document.getElementById("s3-factor").value, fuelFactor: factorById("FE-S3-DIESEL")?.valor || 2.68, transportFactor: factorById("FE-S3-TKM")?.valor || factorById(document.getElementById("s3-factor").value)?.valor || 0, evidenciaIds: ev, updatedAt: new Date().toISOString() });
     pushLog(`Alta ${tab}`); renderAll();
   };
   if (tab === "scope2") {
@@ -327,11 +382,20 @@ function parseCsvRows(text) {
 }
 
 
+function normalizeHeader(header = "") {
+  return String(header || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[\s-]+/g, "_");
+}
+
 function parseNumber(value) {
-  if (value === null || value === undefined || value === "") return 0;
-  const normalized = String(value).replace(",", ".");
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  let normalized = raw.replace(/\s+/g, "");
+  if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(normalized)) normalized = normalized.replace(/\./g, "").replace(",", ".");
+  else if (/^-?\d{1,3}(,\d{3})+\.\d+$/.test(normalized)) normalized = normalized.replace(/,/g, "");
+  else if (normalized.includes(",") && !normalized.includes(".")) normalized = normalized.replace(",", ".");
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function validIsoDate(value) {
@@ -342,8 +406,9 @@ function validMonthStart(value) {
   return /^\d{4}-\d{2}$/.test(value || "") ? `${value}-01` : validIsoDate(value);
 }
 
-function parseEvidenceIds(row) {
-  return [row.evidencia_id, row.evidence_id].filter(Boolean).join("|").split("|").map((v) => v.trim()).filter(Boolean);
+function parseEvidenceIds(row, mapped = {}) {
+  const raw = [row[mapped.link_evidencia], row.evidencia_id, row.evidence_id, row.link_evidencia].filter(Boolean).join("|");
+  return raw.split("|").map((v) => v.trim()).filter(Boolean);
 }
 
 function resolveEvidenceUrl(...values) {
@@ -351,6 +416,24 @@ function resolveEvidenceUrl(...values) {
     if (String(value || "").trim()) return String(value).trim();
   }
   return "";
+}
+
+function pickMapped(row, mappedKey) {
+  return mappedKey ? row[mappedKey] : "";
+}
+
+function mapHeaders(headers, synonyms) {
+  const normalizedToOriginal = Object.fromEntries(headers.map((h) => [normalizeHeader(h), h]));
+  const mapping = {};
+  Object.entries(synonyms).forEach(([field, names]) => {
+    const found = names.map(normalizeHeader).find((n) => normalizedToOriginal[n]);
+    mapping[field] = found ? normalizedToOriginal[found] : "";
+  });
+  return mapping;
+}
+
+function updateImportDiagnostics(scope, headers, mapping, nulls) {
+  state.importDiagnostics[scope] = { headers, mapping, nulls };
 }
 
 function showNoDataBanner(records) {
@@ -367,110 +450,129 @@ function nextScopeCode(scope) {
 
 function importScope1Csv(text) {
   const rows = parseCsvRows(text);
+  const headers = rows[0] ? Object.keys(rows[0]) : [];
+  const synonyms = {
+    fecha: ["fecha", "date"], id: ["id", "codigo", "registro"], actividad: ["actividad", "tipo", "concepto", "categoria"],
+    cantidad: ["cantidad", "entrada", "valor", "litros", "kg", "refrigerante_kg", "combustible_l"], unidad: ["unidad", "unit", "u"],
+    tipo_evidencia: ["tipo_evidencia", "evidencia_tipo", "tipo_ev"], link_evidencia: ["link_evidencia", "evidencia_url", "url", "link", "drive", "adjunto"],
+    nota: ["nota", "detalle", "observacion", "obs"], gwp: ["gwp", "gwp_100y"], subtipo: ["subtipo", "refrigerante", "refrigerante_tipo"]
+  };
+  const mapped = mapHeaders(headers, synonyms);
   let imported = 0;
+  let missingCantidad = 0;
+  let missingRefrigerante = 0;
   rows.forEach((row) => {
-    const evidenceUrl = resolveEvidenceUrl(row.evidencia_url, row.evidence_url);
-    const evidenciaIds = parseEvidenceIds(row);
-    const fecha = validIsoDate(row.fecha);
+    const unidadRaw = String(pickMapped(row, mapped.unidad) || "").toLowerCase();
+    const cantidad = parseNumber(pickMapped(row, mapped.cantidad));
+    const fecha = validIsoDate(pickMapped(row, mapped.fecha));
+    const evidenciaIds = parseEvidenceIds(row, mapped);
     const base = {
       fecha,
       evidenciaIds,
       evidenceId: evidenciaIds[0] || "",
-      sourceCsvId: row.id_actividad || "",
-      sourceCsvCode: row.id_actividad || "",
-      codigo: row.id_actividad || "",
-      source: row.fuente || row.detalle || row.equipo || "",
-      notes: row.nota || "",
-      sourceLabel: row.fuente_dato || "CSV",
-      evidenceUrl,
+      codigo: pickMapped(row, mapped.id) || "",
+      source: pickMapped(row, mapped.actividad) || "",
+      notes: pickMapped(row, mapped.nota) || "",
+      evidenceUrl: resolveEvidenceUrl(pickMapped(row, mapped.link_evidencia), row.evidencia_url, row.evidence_url),
       updatedAt: new Date().toISOString()
     };
-    if (row.refrigerante_tipo || row.masa_kg || row.gwp_100y) {
-      state.scope1.refrigerants.push({
-        id: nextScopeCode("s1r"),
-        refType: row.refrigerante_tipo || "OTRO",
-        input: parseNumber(row.masa_kg),
-        factor: parseNumber(row.gwp_100y),
-        factorId: row.refrigerante_tipo || "manual",
-        ...base
-      });
+    const subtipo = String(pickMapped(row, mapped.subtipo) || "").toUpperCase();
+    const isRefrigerant = subtipo.startsWith("R") || unidadRaw === "kg" || String(base.source || "").toLowerCase().includes("refriger");
+    if (isRefrigerant) {
+      const csvGwp = parseNumber(pickMapped(row, mapped.gwp));
+      const factorFromTable = state.factores.find((f) => f.unidad === "GWP" && f.nombre.toUpperCase().replace(/[-\s]/g, "") === subtipo.replace(/[-\s]/g, ""));
+      const factor = csvGwp ?? factorFromTable?.valor ?? null;
+      if (cantidad === null || factor === null) missingRefrigerante += 1;
+      state.scope1.refrigerants.push({ id: nextScopeCode("s1r"), refType: subtipo || "OTRO", input: cantidad, factor, factorId: factorFromTable?.id || "manual", sourceType: "refrigerant", ...base });
       imported += 1;
       return;
     }
-    state.scope1.fuels.push({
-      id: nextScopeCode("s1f"),
-      activity: row.detalle || row.combustible_tipo || row.equipo || "Combustible",
-      input: parseNumber(row.litros),
-      factor: factorById("FE-S1-MEZCLA2T")?.valor || 0,
-      factorId: "FE-S1-MEZCLA2T",
-      fuelType: row.combustible_tipo || "",
-      ...base
-    });
+    if (cantidad === null) missingCantidad += 1;
+    const unit = unidadRaw.includes("kg") ? "kg" : "L";
+    const factorDefault = factorById("FE-S1-MEZCLA2T")?.valor || 2.31;
+    state.scope1.fuels.push({ id: nextScopeCode("s1f"), activity: base.source || "Combustible", input: cantidad, factor: factorDefault, factorId: "FE-S1-MEZCLA2T", fuelType: unit === "kg" ? "combustible_kg" : "nafta_2t", unit, sourceType: "fuel", ...base });
     imported += 1;
   });
+  updateImportDiagnostics("scope1", headers, mapped, { cantidad: missingCantidad, refrigerante_kg: missingRefrigerante });
   return imported;
 }
 
 function importScope2Csv(text) {
   const rows = parseCsvRows(text);
+  const headers = rows[0] ? Object.keys(rows[0]) : [];
+  const synonyms = {
+    kwh: ["kwh", "consumo_kwh", "energia_kwh", "energia", "consumo"],
+    periodo: ["periodo", "mes", "month"], fecha: ["fecha", "date"], id: ["id", "codigo", "registro"],
+    link_evidencia: ["link_evidencia", "evidencia_url", "url", "link", "drive", "adjunto"], nota: ["nota", "detalle", "observacion", "obs"]
+  };
+  const mapped = mapHeaders(headers, synonyms);
   let imported = 0;
+  let missingKwh = 0;
   rows.forEach((row) => {
-    const evidenciaIds = parseEvidenceIds(row);
-    const fechaInicio = validIsoDate(row.fecha_inicio);
-    const fechaFin = validIsoDate(row.fecha_fin);
-    const periodo = validMonthStart(row.periodo_mes) || fechaInicio || fechaFin;
+    const kwh = parseNumber(pickMapped(row, mapped.kwh));
+    if (kwh === null) missingKwh += 1;
+    const evidenciaIds = parseEvidenceIds(row, mapped);
+    const periodValue = pickMapped(row, mapped.periodo);
     state.scope2.push({
       id: nextScopeCode("scope2"),
-      fecha: periodo,
-      periodStart: fechaInicio,
-      periodEnd: fechaFin,
-      kwh: parseNumber(row.kwh),
-      source: row.proveedor || row.fuente_dato || "Electricidad",
-      dataQuality: row.dato_sintetico === "true" || row.dato_sintetico === "1" ? "Estimado" : "Medido",
-      assumptions: row.nota || "",
+      fecha: validMonthStart(periodValue) || validIsoDate(pickMapped(row, mapped.fecha)),
+      kwh,
+      source: "Electricidad",
+      assumptions: pickMapped(row, mapped.nota) || "",
       evidenceId: evidenciaIds[0] || "",
       evidenciaIds,
-      evidenceUrl: resolveEvidenceUrl(row.evidencia_url, row.evidence_url),
-      sourceCsvId: row.id_actividad || "",
-      codigo: row.id_actividad || "",
+      evidenceUrl: resolveEvidenceUrl(pickMapped(row, mapped.link_evidencia), row.evidencia_url, row.evidence_url),
+      codigo: pickMapped(row, mapped.id) || "",
       factor_id: "FE-S2-AR",
       updatedAt: new Date().toISOString()
     });
     imported += 1;
   });
+  updateImportDiagnostics("scope2", headers, mapped, { kwh: missingKwh });
   return imported;
 }
 
 function importScope3Csv(text) {
   const rows = parseCsvRows(text);
+  const headers = rows[0] ? Object.keys(rows[0]) : [];
+  const synonyms = {
+    tkm: ["tkm", "ton_km", "tonelada_km"], km_total: ["km_total", "km", "distancia_km", "distancia"], carga_kg: ["carga_kg", "kg", "peso_kg", "carga"],
+    combustible_l: ["combustible_l", "litros", "l", "diesel_l", "nafta_l"], fecha: ["fecha", "date"], id: ["id", "codigo", "registro"], actividad: ["actividad", "tipo", "concepto", "categoria", "cliente", "vehiculo"],
+    link_evidencia: ["link_evidencia", "evidencia_url", "url", "link", "drive", "adjunto"], nota: ["nota", "detalle", "observacion", "obs"]
+  };
+  const mapped = mapHeaders(headers, synonyms);
   let imported = 0;
+  let missingCombustible = 0;
+  let missingTkm = 0;
   rows.forEach((row) => {
-    const evidenciaIds = parseEvidenceIds(row);
+    const evidenciaIds = parseEvidenceIds(row, mapped);
+    const combustible_l = parseNumber(pickMapped(row, mapped.combustible_l));
+    const tkm = parseNumber(pickMapped(row, mapped.tkm));
+    if (combustible_l === null) missingCombustible += 1;
+    if (combustible_l === null && tkm === null) missingTkm += 1;
     state.scope3.push({
       id: nextScopeCode("scope3"),
-      fecha: validIsoDate(row.fecha),
-      activity: row.cliente || row.vehiculo_modelo || row.id_servicio || "Transporte",
-      codigo: row.id_servicio || "",
-      sourceCsvId: row.id_servicio || "",
-      km_recorridos: parseNumber(row.km_recorridos),
-      km_ida_vacio: parseNumber(row.km_ida_vacio),
-      km_regreso_con_carga: parseNumber(row.km_regreso_con_carga),
-      carga_kg: parseNumber(row.carga_kg),
-      metrica: row.metrica || "",
-      tkm: parseNumber(row.tkm),
-      litros: parseNumber(row.litros_estimados),
-      fuelType: row.combustible_tipo || "",
-      rendimiento_km_por_l: parseNumber(row.rendimiento_km_por_l),
-      source: row.fuente_dato || "CSV",
-      assumptions: row.nota || "",
+      fecha: validIsoDate(pickMapped(row, mapped.fecha)),
+      activity: pickMapped(row, mapped.actividad) || "Transporte",
+      codigo: pickMapped(row, mapped.id) || "",
+      km_total: parseNumber(pickMapped(row, mapped.km_total)),
+      carga_kg: parseNumber(pickMapped(row, mapped.carga_kg)),
+      tkm,
+      combustible_l,
+      litros: combustible_l,
+      source: "CSV",
+      assumptions: pickMapped(row, mapped.nota) || "",
       evidenceId: evidenciaIds[0] || "",
       evidenciaIds,
-      evidenceUrl: resolveEvidenceUrl(row.evidencia_url, row.evidence_url),
+      evidenceUrl: resolveEvidenceUrl(pickMapped(row, mapped.link_evidencia), row.evidencia_url, row.evidence_url),
       factor_id: "FE-S3-DIESEL",
+      fuelFactor: factorById("FE-S3-DIESEL")?.valor || 2.68,
+      transportFactor: factorById("FE-S3-TKM")?.valor || 0,
       updatedAt: new Date().toISOString()
     });
     imported += 1;
   });
+  updateImportDiagnostics("scope3", headers, mapped, { combustible_l: missingCombustible, tkm: missingTkm });
   return imported;
 }
 
@@ -577,11 +679,11 @@ function renderEvidencias() {
 }
 
 
-function scopeSummary(name, records, total) { return `<tr><td>${name}</td><td>${records.length}</td><td>${coverage(records).toFixed(1)}%</td><td>${dateRange(records)}</td><td>${t4(total)}</td></tr>`; }
+function scopeSummary(name, records, total, emissionFn) { const withoutData = !records.length || records.every((r) => !hasEmission(r, emissionFn)); return `<tr><td>${name}</td><td>${records.length}</td><td>${coverage(records).toFixed(1)}%</td><td>${dateRange(records)}</td><td>${withoutData ? "Sin datos en el período" : t4(total)}</td></tr>`; }
 function renderInformes() {
   const s1 = filterByPeriod(allAlcance1Records()); const s2 = filterByPeriod(state.scope2); const s3 = filterByPeriod(state.scope3);
-  const t1 = s1.reduce((a, r) => a + emissionS1(r), 0), t2 = s2.reduce((a, r) => a + emissionS2(r), 0), t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
-  panel("reportes").innerHTML = `<article class="card full"><h3>Informes</h3><p><b>Período:</b> ${state.globalPeriod.from || "todo"} → ${state.globalPeriod.to || "todo"}</p><div class="table-wrap"><table><thead><tr><th>Alcance</th><th>Registros</th><th>Cobertura</th><th>Rango de fechas</th><th>tCO2e</th></tr></thead><tbody>${scopeSummary("Alcance 1 (Directo)", s1, t1)}${scopeSummary("Alcance 2 (Electricidad)", s2, t2)}${scopeSummary("Alcance 3 (Indirecto: Transporte y otros)", s3, t3)}<tr><td><b>Total</b></td><td>${s1.length + s2.length + s3.length}</td><td>${coverage([...s1, ...s2, ...s3]).toFixed(1)}%</td><td>-</td><td><b>${t4(t1 + t2 + t3)}</b></td></tr></tbody></table></div><div class="btn-row"><button id="exp-json">Exportar JSON</button><button id="imp-json">Importar JSON</button><input id="imp-file" type="file" accept="application/json"><button id="exp-csv-period">Exportar CSV del período</button><button id="exp-csv-all">Exportar CSV completo</button><button id="gen-pdf">Generar informe PDF</button></div></article>`;
+  const t1 = sumValidEmissions(s1, emissionS1), t2 = sumValidEmissions(s2, emissionS2), t3 = sumValidEmissions(s3, emissionS3);
+  panel("reportes").innerHTML = `<article class="card full"><h3>Informes</h3><p><b>Período:</b> ${state.globalPeriod.from || "todo"} → ${state.globalPeriod.to || "todo"}</p><div class="table-wrap"><table><thead><tr><th>Alcance</th><th>Registros</th><th>Cobertura</th><th>Rango de fechas</th><th>tCO2e</th></tr></thead><tbody>${scopeSummary("Alcance 1 (Directo)", s1, t1, emissionS1)}${scopeSummary("Alcance 2 (Electricidad)", s2, t2, emissionS2)}${scopeSummary("Alcance 3 (Indirecto: Transporte y otros)", s3, t3, emissionS3)}<tr><td><b>Total</b></td><td>${s1.length + s2.length + s3.length}</td><td>${coverage([...s1, ...s2, ...s3]).toFixed(1)}%</td><td>-</td><td><b>${t4(t1 + t2 + t3)}</b></td></tr></tbody></table></div><div class="btn-row"><button id="exp-json">Exportar JSON</button><button id="imp-json">Importar JSON</button><input id="imp-file" type="file" accept="application/json"><button id="exp-csv-period">Exportar CSV del período</button><button id="exp-csv-all">Exportar CSV completo</button><button id="gen-pdf">Generar informe PDF</button></div></article>`;
   document.getElementById("exp-json").onclick = () => downloadBlob(JSON.stringify(state, null, 2), "application/json", `${BRAND.toLowerCase()}-backup.json`);
   document.getElementById("imp-json").onclick = async () => { const f = document.getElementById("imp-file").files[0]; if (!f) return; state = normalizeLoadedState(JSON.parse(await f.text())); renderAll(); };
   document.getElementById("exp-csv-period").onclick = () => exportCsv(true);
@@ -590,7 +692,7 @@ function renderInformes() {
 }
 
 function exportCsv(periodOnly) {
-  const rows = (periodOnly ? [...filterByPeriod(allAlcance1Records()), ...filterByPeriod(state.scope2), ...filterByPeriod(state.scope3)] : [...allAlcance1Records(), ...state.scope2, ...state.scope3]).map((r) => [r.id, r.fecha, r.source || r.activity || "", r.input || r.kwh || r.litros || "", r.factor || r.factor_id || "", (r.id.startsWith("S1") ? emissionS1(r) : r.id.startsWith("S2") ? emissionS2(r) : emissionS3(r)).toFixed(4), (r.evidenciaIds || []).join("|")].join(","));
+  const rows = (periodOnly ? [...filterByPeriod(allAlcance1Records()), ...filterByPeriod(state.scope2), ...filterByPeriod(state.scope3)] : [...allAlcance1Records(), ...state.scope2, ...state.scope3]).map((r) => [r.id, r.fecha, r.source || r.activity || "", r.input ?? r.kwh ?? r.combustible_l ?? r.tkm ?? "", r.factor || r.factor_id || "", (() => { const v = r.id.startsWith("S1") ? emissionS1(r) : r.id.startsWith("S2") ? emissionS2(r) : emissionS3(r); return v === null ? "" : v.toFixed(4); })(), (r.evidenciaIds || []).join("|")].join(","));
   downloadBlob(["id,fecha,fuente,entrada,factor,tco2e,evidencias", ...rows].join("\n"), "text/csv", `electrogreem-${periodOnly ? "periodo" : "completo"}.csv`);
   const evidenceRows = state.evidencias.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "", e.url || "", e.drive_file_id || "", e.url_view || "", e.url_download || "", linkedRecordsByEvidenceId(e.id).join("|")].map((v) => `"${String(v).replaceAll('"', '""')}"`).join(","));
   downloadBlob(["id,tipo,archivo,hash,fecha,url,drive_file_id,url_view,url_download,vinculos", ...evidenceRows].join("\n"), "text/csv", `electrogreem-evidencias-${periodOnly ? "periodo" : "completo"}.csv`);
@@ -599,7 +701,7 @@ function downloadBlob(content, type, filename) { const blob = new Blob([content]
 
 function pdfAlcanceTable(doc, y, title, records, mapper) {
   doc.setFontSize(14); doc.text(title, 14, y); y += 6;
-  if (!records.length) { doc.setFillColor(250, 237, 223); doc.rect(14, y, 182, 15, "F"); doc.setFontSize(10); doc.text(`${NO_DATA_MESSAGE}.`, 16, y + 8, { maxWidth: 178 }); return y + 20; }
+  if (!records.length || records.every((r) => mapper(r)[4] === "Dato faltante")) { doc.setFillColor(250, 237, 223); doc.rect(14, y, 182, 15, "F"); doc.setFontSize(10); doc.text("Sin datos para el período seleccionado.", 16, y + 8, { maxWidth: 178 }); return y + 20; }
   doc.autoTable({ startY: y, theme: "grid", styles: { font: "helvetica", fontSize: 9, lineColor: [216, 203, 184], lineWidth: 0.1 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Fecha", "Fuente/Actividad", "Entrada", "Factor", "tCO2e", "Evidencias"]], body: records.map(mapper) });
   return doc.lastAutoTable.finalY + 8;
 }
@@ -607,7 +709,7 @@ function pdfAlcanceTable(doc, y, title, records, mapper) {
 function generatePdf() {
   const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: "mm", format: "a4" });
   const s1 = filterByPeriod(allAlcance1Records()), s2 = filterByPeriod(state.scope2), s3 = filterByPeriod(state.scope3);
-  const t1 = s1.reduce((a, r) => a + emissionS1(r), 0), t2 = s2.reduce((a, r) => a + emissionS2(r), 0), t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
+  const t1 = sumValidEmissions(s1, emissionS1), t2 = sumValidEmissions(s2, emissionS2), t3 = sumValidEmissions(s3, emissionS3);
   const period = state.globalPeriod.from || state.globalPeriod.to ? `${state.globalPeriod.from || "inicio"} a ${state.globalPeriod.to || "actual"}` : "todo";
 
   doc.setFillColor(244, 239, 230); doc.rect(0, 0, 210, 297, "F"); doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.text("ElectroGreem GHG App – Inventario de GEI (Alcance 1/2/3)", 14, 22);
@@ -617,10 +719,10 @@ function generatePdf() {
   doc.text("Supuestos y límites", 14, doc.lastAutoTable.finalY + 8); doc.setFontSize(9); doc.text(["• Depende de datos de actividad y factores cargados.", "• Límites organizacionales declarados por el usuario.", "• No incluye emisiones no registradas en la herramienta."], 14, doc.lastAutoTable.finalY + 14);
   let y = doc.lastAutoTable.finalY + 30;
 
-  y = pdfAlcanceTable(doc, y, "Alcance 1 (Directo)", s1, (r) => [fmtDate(r.fecha), r.source || r.activity || "-", `${r.input} ${r.kind === "refrigerant" ? "kg" : "L"}`, `${r.factor}`, t4(emissionS1(r)), (r.evidenciaIds || []).join("|") || "-"]);
-  y = pdfAlcanceTable(doc, y, "Alcance 2 (Electricidad)", s2, (r) => [fmtDate(r.fecha), "Electricidad", `${r.kwh} kWh`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS2(r)), (r.evidenciaIds || []).join("|") || "-"]);
+  y = pdfAlcanceTable(doc, y, "Alcance 1 (Directo)", s1, (r) => [fmtDate(r.fecha), r.source || r.activity || "-", `${r.input ?? "-"} ${r.kind === "refrigerant" ? "kg" : (r.unit || "L")}`, `${r.factor ?? "-"}`, formatEmission(emissionS1(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
+  y = pdfAlcanceTable(doc, y, "Alcance 2 (Electricidad)", s2, (r) => [fmtDate(r.fecha), "Electricidad", `${r.kwh ?? "-"} kWh`, `${factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS2(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
   if (y > 250) { doc.addPage(); y = 20; }
-  y = pdfAlcanceTable(doc, y, "Alcance 3 (Indirecto: Transporte y otros)", s3, (r) => [fmtDate(r.fecha), r.activity || "-", r.tkm ? `${r.tkm} tkm` : `${r.litros} L`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS3(r)), (r.evidenciaIds || []).join("|") || "-"]);
+  y = pdfAlcanceTable(doc, y, "Alcance 3 (Indirecto: Transporte y otros)", s3, (r) => [fmtDate(r.fecha), r.activity || "-", r.combustible_l !== null && r.combustible_l !== undefined ? `${r.combustible_l} L` : (r.tkm !== null && r.tkm !== undefined ? `${r.tkm} tkm` : "-"), `${(r.combustible_l !== null && r.combustible_l !== undefined ? r.fuelFactor : r.transportFactor) || factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS3(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
 
   doc.autoTable({ startY: y + 3, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Factores utilizados", "Valor", "Unidad"]], body: state.factores.map((f) => [f.id, String(f.valor), f.unidad]) });
   const recordsInPeriod = [...s1, ...s2, ...s3];
@@ -642,8 +744,14 @@ function generatePdf() {
 }
 
 function renderConfig() {
-  panel("config").innerHTML = `<article class="card full"><h3>Configuración</h3><label><input type="checkbox" id="auditor-mode" ${state.auditorMode ? "checked" : ""}> Modo auditor (columnas extra: ID interno, hash/timestamp/factor ID)</label><h3>Pruebas rápidas</h3><ul><li>Caso 1: Período sin datos ⇒ PDF muestra “Sin registros…”.</li><li>Caso 2: 1 refrigerante + evidencia ⇒ S1>0, cobertura S1=100%.</li><li>Caso 3: combustible sin evidencia ⇒ cobertura baja y alerta.</li><li>Caso 4: Exportar JSON / Importar JSON ⇒ mantiene período, datos, evidencias y changelog.</li></ul></article>`;
+  const diag = state.importDiagnostics || initialState().importDiagnostics;
+  const diagBody = ["scope1", "scope2", "scope3"].map((scope) => {
+    const d = diag[scope] || { headers: [], mapping: {}, nulls: {} };
+    return `<h4>${scope.toUpperCase()}</h4><p><b>Headers detectados:</b> ${(d.headers || []).join(", ") || "-"}</p><p><b>Mapeo aplicado:</b> ${Object.entries(d.mapping || {}).map(([k, v]) => `${k}→${v || "(sin mapear)"}`).join(" · ") || "-"}</p><p><b>Registros con null:</b> ${Object.entries(d.nulls || {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "-"}</p>`;
+  }).join("");
+  panel("config").innerHTML = `<article class="card full"><h3>Configuración</h3><label><input type="checkbox" id="auditor-mode" ${state.auditorMode ? "checked" : ""}> Modo auditor (columnas extra: ID interno, hash/timestamp/factor ID)</label><h3>Pruebas rápidas</h3><ul><li>Caso 1: Período sin datos ⇒ PDF muestra “Sin registros…”.</li><li>Caso 2: 1 refrigerante + evidencia ⇒ S1>0, cobertura S1=100%.</li><li>Caso 3: combustible sin evidencia ⇒ cobertura baja y alerta.</li><li>Caso 4: Exportar JSON / Importar JSON ⇒ mantiene período, datos, evidencias y changelog.</li></ul><button id="run-import-diagnostics" type="button" class="secondary">Diagnóstico importación</button><div id="diag-output"></div></article>`;
   document.getElementById("auditor-mode").onchange = (e) => { state.auditorMode = e.target.checked; renderAll(); };
+  document.getElementById("run-import-diagnostics").onclick = () => { document.getElementById("diag-output").innerHTML = `<article class="card full">${diagBody}</article>`; };
 }
 
 function renderAll() {

@@ -237,3 +237,12 @@ ul { color: var(--accent-strong); }
   border-color: var(--danger);
   background: var(--danger-soft);
 }
+
+
+.report-audit-grid {
+  display: grid;
+  gap: .65rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+  margin-bottom: .55rem;
+}

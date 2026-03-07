@@ -35,7 +35,8 @@ function initialState() {
     scope2: [],
     scope3: [],
     evidencias: [],
-    changelog: [{ at: now, action: "Inicialización", author: "Sistema" }]
+    changelog: [{ at: now, action: "Inicialización", author: "Sistema" }],
+    reportFilter: { from: "", to: "", onlyWithEvidence: false, enabled: false }
   };
 }
 
@@ -136,11 +137,16 @@ function renderAll() {
 
 function renderInicio() {
   const el = panel("inicio");
-  const total1 = state.scope1.reduce((a, r) => a + calcScope1Emission(r), 0);
-  const total2 = state.scope2.reduce((a, r) => a + calcScope2Emission(r), 0);
-  const total3 = state.scope3.reduce((a, r) => a + calcScope3Emission(r), 0);
+  const currentFilter = getActiveReportFilter();
+  const data = reportRecords(currentFilter.from, currentFilter.to, currentFilter.onlyWithEvidence);
+  const total1 = data.s1.reduce((a, r) => a + calcScope1Emission(r), 0);
+  const total2 = data.s2.reduce((a, r) => a + calcScope2Emission(r), 0);
+  const total3 = data.s3.reduce((a, r) => a + calcScope3Emission(r), 0);
   const total = total1 + total2 + total3;
-  const globalCoverage = coverage([...state.scope1, ...state.scope2, ...state.scope3]);
+  const globalCoverage = coverage([...data.s1, ...data.s2, ...data.s3]);
+  const periodText = currentFilter.enabled ? `${currentFilter.from || "inicio"} a ${currentFilter.to || "actual"}` : "Todo el historial";
+  const warnNoDate = data.excludedNoDate > 0 ? `<small class="report-warning">${data.excludedNoDate} registros sin fecha excluidos por filtro activo.</small>` : "";
+
   el.innerHTML = `
   <article class="card full">
     <h3>Guía rápida · ${BRAND} GHG App – Inventario de GEI (Scope 1/2/3)</h3>
@@ -152,11 +158,13 @@ function renderInicio() {
       <li><b>Validez:</b> trazabilidad por evidencias vinculadas + registro de cambios + timestamp de factores.</li>
       <li><b>Aviso:</b> la calidad de resultados depende de la calidad del dato de entrada y de los factores configurados.</li>
     </ul>
+    <p><b>Período activo:</b> ${periodText} · <b>Modo:</b> ${currentFilter.onlyWithEvidence ? "solo con evidencias" : "con y sin evidencias"}</p>
+    ${warnNoDate}
   </article>
   <article class="card"><h3>Total general</h3><div class="metric">${total.toFixed(3)} tCO2e</div></article>
-  <article class="card"><h3>Scope 1</h3><div class="metric">${total1.toFixed(3)} tCO2e</div><small>${state.scope1.length} registros · cobertura ${coverage(state.scope1).toFixed(1)}%</small></article>
-  <article class="card"><h3>Scope 2</h3><div class="metric">${total2.toFixed(3)} tCO2e</div><small>${state.scope2.length} registros · cobertura ${coverage(state.scope2).toFixed(1)}%</small></article>
-  <article class="card"><h3>Scope 3</h3><div class="metric">${total3.toFixed(3)} tCO2e</div><small>${state.scope3.length} registros · cobertura ${coverage(state.scope3).toFixed(1)}%</small></article>
+  <article class="card"><h3>Scope 1</h3><div class="metric">${total1.toFixed(3)} tCO2e</div><small>${data.s1.length} registros · cobertura ${coverage(data.s1).toFixed(1)}%</small></article>
+  <article class="card"><h3>Scope 2</h3><div class="metric">${total2.toFixed(3)} tCO2e</div><small>${data.s2.length} registros · cobertura ${coverage(data.s2).toFixed(1)}%</small></article>
+  <article class="card"><h3>Scope 3</h3><div class="metric">${total3.toFixed(3)} tCO2e</div><small>${data.s3.length} registros · cobertura ${coverage(data.s3).toFixed(1)}%</small></article>
   <article class="card full"><h3>Cobertura de evidencias global</h3><div class="metric">${globalCoverage.toFixed(1)}%</div></article>`;
 }
 
@@ -357,70 +365,237 @@ function renderEvidencias() {
   });
 }
 
-function dateInRange(dateVal, from, to) {
-  if (!dateVal) return false;
-  const d = /^\d{4}-\d{2}$/.test(dateVal) ? `${dateVal}-01` : dateVal;
-  if (from && d < from) return false;
-  if (to && d > to) return false;
-  return true;
+function normalizeRecordDate(dateVal) {
+  if (!dateVal) return "";
+  return /^\d{4}-\d{2}$/.test(dateVal) ? `${dateVal}-01` : dateVal;
 }
 
-function reportRecords(from, to, onlyWithEvidence) {
-  const s1 = state.scope1.filter((r) => dateInRange(r.fecha, from, to)).filter((r) => !onlyWithEvidence || (r.evidenciaIds || []).length);
-  const s2 = state.scope2.filter((r) => dateInRange(r.fecha, from, to)).filter((r) => !onlyWithEvidence || (r.evidenciaIds || []).length);
-  const s3 = state.scope3.filter((r) => dateInRange(r.fecha, from, to)).filter((r) => !onlyWithEvidence || (r.evidenciaIds || []).length);
-  return { s1, s2, s3 };
+function hasActivePeriod(fromDate, toDate) {
+  return Boolean(fromDate || toDate);
 }
 
-function buildReportHtml(from, to, onlyWithEvidence, includeTrace) {
-  const data = reportRecords(from, to, onlyWithEvidence);
+function filterByPeriod(records, fromDate, toDate) {
+  const filtered = [];
+  let excludedNoDate = 0;
+  const periodActive = hasActivePeriod(fromDate, toDate);
+
+  records.forEach((record) => {
+    const normalizedDate = normalizeRecordDate(record.fecha);
+    if (!normalizedDate) {
+      if (periodActive) excludedNoDate += 1;
+      else filtered.push(record);
+      return;
+    }
+    if (fromDate && normalizedDate < fromDate) return;
+    if (toDate && normalizedDate > toDate) return;
+    filtered.push(record);
+  });
+
+  return { records: filtered, excludedNoDate };
+}
+
+function getActiveReportFilter() {
+  const configured = state.reportFilter || {};
+  const enabled = Boolean(configured.enabled || configured.from || configured.to);
+  return {
+    from: configured.from || "",
+    to: configured.to || "",
+    onlyWithEvidence: Boolean(configured.onlyWithEvidence),
+    includeTrace: configured.includeTrace !== false,
+    enabled
+  };
+}
+
+function reportRecords(fromDate = "", toDate = "", onlyWithEvidence = false) {
+  const s1Period = filterByPeriod(state.scope1, fromDate, toDate);
+  const s2Period = filterByPeriod(state.scope2, fromDate, toDate);
+  const s3Period = filterByPeriod(state.scope3, fromDate, toDate);
+
+  const byEvidence = (rows) => rows.filter((r) => !onlyWithEvidence || (r.evidenciaIds || []).length > 0);
+  return {
+    s1: byEvidence(s1Period.records),
+    s2: byEvidence(s2Period.records),
+    s3: byEvidence(s3Period.records),
+    excludedNoDate: s1Period.excludedNoDate + s2Period.excludedNoDate + s3Period.excludedNoDate
+  };
+}
+
+function scopeSectionHtml(title, records, columns, subtotal) {
+  if (!records.length) {
+    return `<section class="report-section report-scope-break"><h2>${title}</h2><p class="empty-note">Sin registros en el período.</p><p><b>Subtotal:</b> ${subtotal.toFixed(4)} tCO2e</p></section>`;
+  }
+
+  return `<section class="report-section report-scope-break"><h2>${title}</h2>
+  <table class="report-table"><thead><tr>${columns.map((col) => `<th>${col}</th>`).join("")}</tr></thead>
+  <tbody>${records.join("")}</tbody></table><p><b>Subtotal:</b> ${subtotal.toFixed(4)} tCO2e</p></section>`;
+}
+
+function buildReportHtml(fromDate, toDate, onlyWithEvidence, includeTrace) {
+  const data = reportRecords(fromDate, toDate, onlyWithEvidence);
   const t1 = data.s1.reduce((a, r) => a + calcScope1Emission(r), 0);
   const t2 = data.s2.reduce((a, r) => a + calcScope2Emission(r), 0);
   const t3 = data.s3.reduce((a, r) => a + calcScope3Emission(r), 0);
+  const total = t1 + t2 + t3;
   const now = new Date();
-  const factorRows = state.factores.map((f) => `<tr><td>${f.id}</td><td>${f.alcance}</td><td>${f.nombre}</td><td>${f.valor}</td><td>${f.unidad}</td></tr>`).join("");
-  const traza = state.evidencias.map((ev) => `<tr><td>${ev.id}</td><td>${ev.tipo}</td><td>${ev.archivo_nombre}</td><td>${ev.hash || ""}</td><td>${ev.fecha_documento || ""}</td><td>${linkedRecordsByEvidenceId(ev.id).join("; ")}</td></tr>`).join("");
+  const periodLabel = hasActivePeriod(fromDate, toDate) ? `${fromDate || "inicio"} a ${toDate || "actual"}` : "Todo";
 
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"/><title>Informe GEI</title>
-  <style>
-  body{font-family:Arial,sans-serif;color:#222;margin:20px;background:#fff8ef} h1,h2,h3{color:#304f35} table{width:100%;border-collapse:collapse;margin:8px 0 16px} th,td{border:1px solid #d4c8b5;padding:6px;vertical-align:top} tr{page-break-inside:avoid} .meta{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-  @media print{ @page{size:A4;margin:16mm} .no-print{display:none} header,footer{position:fixed;left:0;right:0;color:#666;font-size:11px} header{top:0} footer{bottom:0} body{margin-top:28mm;margin-bottom:20mm} }
-  </style></head><body>
-  <button class="no-print" onclick="window.print()">Descargar PDF</button>
-  <header>${BRAND} · Informe GEI · v${APP_VERSION}</header><footer>${BRAND} · v${APP_VERSION} · Generado ${now.toLocaleString()}</footer>
-  <section><h1>${BRAND} GHG App – Inventario de GEI (Scope 1/2/3)</h1>
-  <div class="meta"><div><b>Autor:</b> Héctor Miguel Fadel</div><div><b>Tutor:</b> Prof. Ing. Ramón Oris</div><div><b>Contexto:</b> Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT)</div><div><b>Período:</b> ${from || "inicio"} a ${to || "actual"}</div><div><b>Versión:</b> ${APP_VERSION}</div><div><b>Fecha/hora:</b> ${now.toLocaleString()}</div></div></section>
-  <section><h2>Resumen ejecutivo</h2><p>Scope 1: <b>${t1.toFixed(4)}</b> tCO2e · Scope 2: <b>${t2.toFixed(4)}</b> tCO2e · Scope 3: <b>${t3.toFixed(4)}</b> tCO2e · Total: <b>${(t1 + t2 + t3).toFixed(4)}</b> tCO2e.</p><p>Cobertura de evidencias global: ${coverage([...data.s1, ...data.s2, ...data.s3]).toFixed(1)}%</p></section>
-  <section><h2>Supuestos y límites</h2><p>Incluye solo operaciones registradas en la herramienta. Los resultados dependen de datos de actividad y factores configurados.</p></section>
-  <section><h2>Metodología y ecuaciones</h2><ul><li>Scope 1 refrigerante: tCO2e = (kg × GWP) / 1000.</li><li>Scope 1 combustible: tCO2e = (L × EF kgCO2e/L) / 1000.</li><li>Scope 2: tCO2e = (kWh/1000) × FE tCO2e/MWh.</li><li>Scope 3: tCO2e = (L × EF kgCO2e/L) / 1000.</li></ul></section>
-  <section><h2>Resultados por Scope</h2>
-  <h3>Scope 1</h3><table><thead><tr><th>Fecha</th><th>Fuente</th><th>Actividad</th><th>Entrada</th><th>Factor</th><th>tCO2e</th><th>Evidencias</th></tr></thead><tbody>${data.s1.map((r) => `<tr><td>${r.fecha}</td><td>${r.fuente}</td><td>${r.actividad}</td><td>${r.cantidad} ${r.unidad}</td><td>${r.factor_emision}</td><td>${calcScope1Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(",")}</td></tr>`).join("")}</tbody></table>
-  <h3>Scope 2</h3><table><thead><tr><th>Fecha</th><th>kWh</th><th>Factor</th><th>tCO2e</th><th>Evidencias</th></tr></thead><tbody>${data.s2.map((r) => `<tr><td>${r.fecha}</td><td>${r.kwh}</td><td>${r.factor_id}</td><td>${calcScope2Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(",")}</td></tr>`).join("")}</tbody></table>
-  <h3>Scope 3</h3><table><thead><tr><th>Fecha</th><th>Actividad</th><th>Entrada</th><th>Factor</th><th>tCO2e</th><th>Evidencias</th></tr></thead><tbody>${data.s3.map((r) => `<tr><td>${r.fecha}</td><td>${r.actividad}</td><td>${r.litros} L</td><td>${r.factor_id}</td><td>${calcScope3Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(",")}</td></tr>`).join("")}</tbody></table>
-  <p><b>Total general:</b> ${(t1 + t2 + t3).toFixed(4)} tCO2e</p>
-  </section>
-  <section><h2>Factores utilizados</h2><p>Versión ${state.meta.factorsVersion} · Última actualización ${new Date(state.meta.factorsUpdatedAt).toLocaleString()}</p><table><thead><tr><th>ID</th><th>Scope</th><th>Nombre</th><th>Valor</th><th>Unidad</th></tr></thead><tbody>${factorRows}</tbody></table></section>
-  ${includeTrace ? `<section><h2>Trazabilidad</h2><table><thead><tr><th>ID</th><th>Tipo</th><th>Nombre</th><th>Hash</th><th>Fecha</th><th>Vinculación</th></tr></thead><tbody>${traza}</tbody></table></section>` : ""}
-  <section><h2>Registro de cambios</h2><table><thead><tr><th>Fecha</th><th>Acción</th><th>Autor</th></tr></thead><tbody>${state.changelog.map((c) => `<tr><td>${new Date(c.at).toLocaleString()}</td><td>${c.action}</td><td>${c.author}</td></tr>`).join("")}</tbody></table></section>
-  <section><h2>Créditos / Equipo</h2><p><b>Autor:</b> Héctor Miguel Fadel</p><p><b>Contexto:</b> Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT)</p><p><b>Supervisión:</b> Prof. Ing. Ramón Oris</p><p><b>Agradecimientos:</b> Búho Producciones Artísticas.</p></section>
+  const factorRows = state.factores.map((f) => `<tr><td>${f.id}</td><td>${f.alcance}</td><td>${f.nombre}</td><td>${f.valor}</td><td>${f.unidad}</td></tr>`).join("");
+  const traza = state.evidencias.map((ev) => `<tr><td>${ev.id}</td><td>${ev.tipo}</td><td>${ev.archivo_nombre}</td><td>${ev.hash || ""}</td><td>${ev.fecha_documento || ""}</td><td>${linkedRecordsByEvidenceId(ev.id).join("; ") || "Sin vínculo"}</td></tr>`).join("");
+
+  const baseStyles = `
+  :root { --bg:#f4efe4; --bg-alt:#eae1d1; --surface:#efe6d8; --surface-strong:#e2d6c3; --text:#1f1f1c; --text-muted:#5b564c; --accent:#557a5a; --accent-strong:#416146; --accent-soft:#dce7d8; --border:#cdbfa9; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter, Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--text); line-height:1.45; font-size:12px; }
+  h1,h2,h3 { color:var(--accent-strong); margin:.2rem 0 .45rem; }
+  .report-wrap { max-width:960px; margin:0 auto; padding:1.2rem; }
+  .report-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem; margin-bottom:.85rem; }
+  .report-meta { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:.4rem 1rem; color:var(--text-muted); }
+  .kpi-grid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.6rem; }
+  .kpi { background:var(--bg-alt); border:1px solid var(--border); border-radius:10px; padding:.6rem; }
+  .kpi strong { font-size:1.15rem; color:var(--accent-strong); }
+  table { width:100%; border-collapse:collapse; background:var(--surface); }
+  th,td { border:1px solid var(--border); padding:.35rem .45rem; text-align:left; vertical-align:top; }
+  th { background:var(--surface-strong); }
+  tbody tr:nth-child(even) td { background:color-mix(in srgb, var(--surface) 88%, var(--bg) 12%); }
+  .report-table { margin-top:.45rem; }
+  .report-warning { color:#7c5a1e; font-weight:600; }
+  .empty-note { color:var(--text-muted); font-style:italic; }
+  .print-controls { display:flex; gap:.55rem; margin-bottom:1rem; }
+  .print-controls button { border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--accent); color:#fff; cursor:pointer; }
+  .report-header { position:sticky; top:0; background:var(--bg); padding:.35rem 0 .55rem; margin-bottom:.65rem; }
+  @media print {
+    @page { size:A4 portrait; margin:13mm; }
+    body { font-size:11px; background:#fff; }
+    .no-print { display:none !important; }
+    .report-wrap { max-width:none; padding:0; }
+    .report-header { position:fixed; top:0; left:0; right:0; background:#fff; border-bottom:1px solid var(--border); padding:3mm 0; }
+    .report-page-content { margin-top:18mm; }
+    .report-scope-break { page-break-before:always; }
+    table { page-break-inside:auto; }
+    tr { page-break-inside:avoid; page-break-after:auto; }
+  }
+  `;
+
+  const scope1Rows = data.s1.map((r) => `<tr><td>${r.id}</td><td>${r.fecha || "-"}</td><td>${r.fuente}</td><td>${r.actividad}</td><td>${r.cantidad} ${r.unidad}</td><td>${Number(r.factor_emision).toFixed(3)}</td><td>${calcScope1Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(", ") || "-"}</td></tr>`);
+  const scope2Rows = data.s2.map((r) => `<tr><td>${r.id}</td><td>${r.fecha || "-"}</td><td>${r.kwh}</td><td>${factorById(r.factor_id)?.nombre || r.factor_id}</td><td>${calcScope2Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(", ") || "-"}</td></tr>`);
+  const scope3Rows = data.s3.map((r) => `<tr><td>${r.id}</td><td>${r.fecha || "-"}</td><td>${r.actividad}</td><td>${r.litros} L</td><td>${factorById(r.factor_id)?.nombre || r.factor_id}</td><td>${calcScope3Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(", ") || "-"}</td></tr>`);
+
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"/><title>Reporte GEI</title><style>${baseStyles}</style></head><body>
+  <div class="report-wrap">
+    <div class="print-controls no-print"><button onclick="window.print()">Descargar PDF</button><button onclick="window.close()">Cerrar</button></div>
+    <header class="report-header"><strong>ElectroGreem GHG App</strong> · Inventario GEI Scope 1/2/3 · Período ${periodLabel}</header>
+    <div class="report-page-content">
+      <section class="report-card">
+        <h1>ElectroGreem GHG App — Inventario de GEI (Scope 1/2/3)</h1>
+        <p><b>Autor:</b> Héctor Miguel Fadel | PPS Ing. Electrónica (UTN-FRT) | <b>Tutor:</b> Prof. Ing. Ramón Oris</p>
+        <div class="report-meta">
+          <div><b>Versión:</b> ${APP_VERSION}</div><div><b>Fecha/hora:</b> ${now.toLocaleString()}</div>
+          <div><b>Período:</b> ${periodLabel}</div><div><b>Modo:</b> ${onlyWithEvidence ? "con evidencias" : "sin filtro de evidencias"}</div>
+        </div>
+        ${data.excludedNoDate ? `<p class="report-warning">${data.excludedNoDate} registros sin fecha excluidos por período activo.</p>` : ""}
+      </section>
+
+      <section class="report-card report-section">
+        <h2>Resumen ejecutivo</h2>
+        <div class="kpi-grid">
+          <div class="kpi"><div>Scope 1</div><strong>${t1.toFixed(4)}</strong><div>tCO2e</div></div>
+          <div class="kpi"><div>Scope 2</div><strong>${t2.toFixed(4)}</strong><div>tCO2e</div></div>
+          <div class="kpi"><div>Scope 3</div><strong>${t3.toFixed(4)}</strong><div>tCO2e</div></div>
+          <div class="kpi"><div>Total</div><strong>${total.toFixed(4)}</strong><div>tCO2e</div></div>
+        </div>
+        <p>Cobertura de evidencias: ${coverage([...data.s1, ...data.s2, ...data.s3]).toFixed(1)}%</p>
+      </section>
+
+      ${scopeSectionHtml("Alcance 1 (Scope 1)", scope1Rows, ["ID", "Fecha", "Actividad", "Descripción", "Entrada", "Factor", "Resultado (tCO2e)", "Evidencias"], t1)}
+      ${scopeSectionHtml("Alcance 2 (Scope 2)", scope2Rows, ["ID", "Fecha", "Entrada (kWh)", "Factor", "Resultado (tCO2e)", "Evidencias"], t2)}
+      ${scopeSectionHtml("Alcance 3 (Scope 3)", scope3Rows, ["ID", "Fecha", "Actividad", "Entrada", "Factor", "Resultado (tCO2e)", "Evidencias"], t3)}
+
+      <section class="report-card report-section report-scope-break">
+        <h2>Total</h2>
+        <table class="report-table"><thead><tr><th>Concepto</th><th>tCO2e</th></tr></thead><tbody>
+          <tr><td>Scope 1</td><td>${t1.toFixed(4)}</td></tr>
+          <tr><td>Scope 2</td><td>${t2.toFixed(4)}</td></tr>
+          <tr><td>Scope 3</td><td>${t3.toFixed(4)}</td></tr>
+          <tr><td><b>Total</b></td><td><b>${total.toFixed(4)}</b></td></tr>
+        </tbody></table>
+      </section>
+
+      <section class="report-card report-section">
+        <h2>Anexos</h2>
+        <h3>Factores utilizados</h3>
+        <table class="report-table"><thead><tr><th>ID</th><th>Scope</th><th>Nombre</th><th>Valor</th><th>Unidad</th></tr></thead><tbody>${factorRows}</tbody></table>
+        ${includeTrace ? `<h3>Trazabilidad</h3><table class="report-table"><thead><tr><th>ID</th><th>Tipo</th><th>Nombre</th><th>Hash</th><th>Fecha</th><th>Vinculación</th></tr></thead><tbody>${traza || '<tr><td colspan="6">Sin evidencias cargadas.</td></tr>'}</tbody></table>` : ""}
+        <h3>Registro de cambios</h3>
+        <table class="report-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Autor</th></tr></thead><tbody>${state.changelog.map((c) => `<tr><td>${new Date(c.at).toLocaleString()}</td><td>${c.action}</td><td>${c.author}</td></tr>`).join("")}</tbody></table>
+      </section>
+
+      <section class="report-card report-section">
+        <h2>Supuestos y metodología</h2>
+        <p>Se consideran únicamente registros operativos cargados en la aplicación y factores vigentes declarados por el usuario.</p>
+        <ul>
+          <li>Scope 1 refrigerante: tCO2e = (kg × GWP) / 1000.</li>
+          <li>Scope 1 combustible: tCO2e = (L × EF kgCO2e/L) / 1000.</li>
+          <li>Scope 2: tCO2e = (kWh / 1000) × FE (tCO2e/MWh).</li>
+          <li>Scope 3: tCO2e = (L × EF kgCO2e/L) / 1000.</li>
+        </ul>
+        <p><b>Créditos:</b> Autor Héctor Miguel Fadel · Tutor Prof. Ing. Ramón Oris.</p>
+      </section>
+    </div>
+  </div>
   </body></html>`;
 }
 
 function renderReportes() {
   const el = panel("reportes");
+  const filter = getActiveReportFilter();
+  const data = reportRecords(filter.from, filter.to, filter.onlyWithEvidence);
+  const t1 = data.s1.reduce((acc, r) => acc + calcScope1Emission(r), 0);
+  const t2 = data.s2.reduce((acc, r) => acc + calcScope2Emission(r), 0);
+  const t3 = data.s3.reduce((acc, r) => acc + calcScope3Emission(r), 0);
+  const periodLabel = filter.enabled ? `${filter.from || "inicio"} a ${filter.to || "actual"}` : "Todo";
+
   el.innerHTML = `<article class="card full"><h3>Informe profesional y PDF</h3>
-  <div class="grid-form">
-  <label>Desde <input type="date" id="rep-from"/></label><label>Hasta <input type="date" id="rep-to"/></label>
-  <label><input type="checkbox" id="rep-only-ev"/> Incluir solo registros con evidencias</label>
-  <label><input type="checkbox" id="rep-trace" checked/> Incluir anexos de trazabilidad</label>
-  <button id="gen-report">Generar informe</button>
-  </div></article>`;
-  document.getElementById("gen-report").onclick = () => {
+  <div class="grid-form report-filter-grid">
+    <label>Fecha desde <input type="date" id="rep-from" value="${filter.from}"/></label>
+    <label>Fecha hasta <input type="date" id="rep-to" value="${filter.to}"/></label>
+    <label><input type="checkbox" id="rep-only-ev" ${filter.onlyWithEvidence ? "checked" : ""}/> Solo registros con evidencias</label>
+    <label><input type="checkbox" id="rep-trace" ${filter.includeTrace ? "checked" : ""}/> Incluir anexos de trazabilidad</label>
+    <button type="button" id="apply-report-filter">Aplicar</button>
+    <button type="button" id="clear-report-filter" class="secondary">Limpiar período</button>
+    <button type="button" id="gen-report">Abrir reporte imprimible</button>
+  </div>
+  <div class="report-preview card-preview">
+    <p><b>Período activo:</b> ${periodLabel}</p>
+    <p><b>Resumen:</b> S1 ${t1.toFixed(4)} · S2 ${t2.toFixed(4)} · S3 ${t3.toFixed(4)} · Total ${(t1 + t2 + t3).toFixed(4)} tCO2e.</p>
+    ${data.excludedNoDate ? `<p class="report-warning">${data.excludedNoDate} registros sin fecha excluidos por período activo.</p>` : ""}
+  </div>
+  </article>`;
+
+  document.getElementById("apply-report-filter").onclick = () => {
     const from = document.getElementById("rep-from").value;
     const to = document.getElementById("rep-to").value;
-    const onlyWithEvidence = document.getElementById("rep-only-ev").checked;
-    const includeTrace = document.getElementById("rep-trace").checked;
-    const html = buildReportHtml(from, to, onlyWithEvidence, includeTrace);
+    state.reportFilter = {
+      ...state.reportFilter,
+      from,
+      to,
+      onlyWithEvidence: document.getElementById("rep-only-ev").checked,
+      includeTrace: document.getElementById("rep-trace").checked,
+      enabled: hasActivePeriod(from, to)
+    };
+    pushLog(`Filtro de reportes aplicado (${from || "inicio"} - ${to || "actual"})`);
+    renderAll();
+    showToast("Filtro de período aplicado");
+  };
+
+  document.getElementById("clear-report-filter").onclick = () => {
+    state.reportFilter = { from: "", to: "", onlyWithEvidence: false, includeTrace: true, enabled: false };
+    renderAll();
+    showToast("Filtro de período limpiado");
+  };
+
+  document.getElementById("gen-report").onclick = () => {
+    const current = getActiveReportFilter();
+    const html = buildReportHtml(current.from, current.to, current.onlyWithEvidence, current.includeTrace);
     const w = window.open("", "_blank");
     w.document.write(html);
     w.document.close();

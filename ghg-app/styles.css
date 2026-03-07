@@ -246,3 +246,20 @@ ul { color: var(--accent-strong); }
   align-items: end;
   margin-bottom: .55rem;
 }
+
+.report-warning {
+  color: #7c5a1e;
+  font-weight: 600;
+}
+
+.report-filter-grid button {
+  align-self: end;
+}
+
+.card-preview {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--surface) 90%, var(--bg) 10%);
+}

@@ -1,6 +1,9 @@
 const STORAGE_KEY = "electrogreem-ghg-v12";
 const APP_VERSION = "1.1.0";
 const BRAND = "ElectroGreem";
+const HISTORIC_ELECTRICITY_ASSUMPTIONS = "Escala del gráfico asumida x10 (30=300 kWh). Meses asignados por orden izquierda→derecha; rótulos no legibles en la foto.";
+const HISTORIC_ELECTRICITY_SOURCE = "Factura EDET (histórico gráfico)";
+const FACTURA_EVIDENCE_ID = "EVD-FACTURA-EDET-001";
 
 const tabs = [["inicio", "Inicio / Instructivo"], ["scope1", "Scope 1 · Emisiones directas"], ["scope2", "Scope 2"], ["scope3", "Scope 3"], ["factores", "Factores"], ["evidencias", "Evidencias"], ["reportes", "Reportes"], ["config", "Configuración"]];
 
@@ -33,11 +36,35 @@ function initialState() {
   };
 }
 
+function normalizeEvidence(ev = {}) {
+  return {
+    id: ev.id || `EVD-${String(Date.now()).slice(-6)}`,
+    tipo: ev.tipo || "",
+    archivo_nombre: ev.archivo_nombre || "",
+    hash: ev.hash || "",
+    fecha_documento: ev.fecha_documento || "",
+    url: ev.url || "",
+    alcance: ev.alcance || "",
+    proveedor: ev.proveedor || ""
+  };
+}
+
+function normalizeLoadedState(rawState) {
+  const base = initialState();
+  const merged = { ...base, ...(rawState || {}) };
+  merged.scope1 = merged.scope1 || { refrigerants: [], fuels: [] };
+  merged.scope1.refrigerants = merged.scope1.refrigerants || [];
+  merged.scope1.fuels = merged.scope1.fuels || [];
+  merged.scope2 = (merged.scope2 || []).map((r) => ({ ...r, evidenciaIds: r.evidenciaIds || (r.evidenceId ? [r.evidenceId] : []) }));
+  merged.scope3 = (merged.scope3 || []).map((r) => ({ ...r, evidenciaIds: r.evidenciaIds || [] }));
+  merged.evidencias = (merged.evidencias || []).map((e) => normalizeEvidence(e));
+  return merged;
+}
+
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    const base = initialState();
-    const merged = { ...base, ...saved };
+    const merged = normalizeLoadedState(saved);
     merged.scope1 = merged.scope1 || { refrigerants: JSON.parse(localStorage.getItem("eg_s1_refrigerants") || "[]"), fuels: JSON.parse(localStorage.getItem("eg_s1_fuels") || "[]") };
     merged.globalPeriod = {
       from: merged.globalPeriod?.from || localStorage.getItem("eg_period_from") || "",
@@ -53,6 +80,51 @@ function saveState() {
   localStorage.setItem("eg_s1_fuels", JSON.stringify(state.scope1.fuels));
   localStorage.setItem("eg_period_from", state.globalPeriod.from || "");
   localStorage.setItem("eg_period_to", state.globalPeriod.to || "");
+}
+
+function ensureFacturaEvidence(url = "") {
+  let evidence = state.evidencias.find((e) => e.id === FACTURA_EVIDENCE_ID);
+  if (!evidence) {
+    evidence = normalizeEvidence({ id: FACTURA_EVIDENCE_ID, tipo: "Factura electricidad", alcance: "Scope 2", proveedor: "EDET", archivo_nombre: "Factura EDET histórico", hash: "manual-demo", fecha_documento: "", url });
+    state.evidencias.push(evidence);
+  }
+  evidence.tipo = "Factura electricidad";
+  evidence.alcance = "Scope 2";
+  evidence.proveedor = "EDET";
+  evidence.url = url || evidence.url || "";
+  return evidence;
+}
+
+function buildMonthlySequence(totalMonths) {
+  const start = new Date();
+  start.setDate(1);
+  start.setMonth(start.getMonth() - (totalMonths - 1));
+  return Array.from({ length: totalMonths }, (_, i) => {
+    const d = new Date(start);
+    d.setMonth(start.getMonth() + i);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+function addHistoricElectricityDataset() {
+  const values = [300, 300, 300, 260, 620, 700, 450, 260, 230, 190, 190, 300, 300];
+  ensureFacturaEvidence();
+  const months = buildMonthlySequence(values.length);
+  values.forEach((kwh, idx) => {
+    state.scope2.push({
+      id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`,
+      fecha: months[idx],
+      kwh,
+      source: HISTORIC_ELECTRICITY_SOURCE,
+      dataQuality: "Estimado",
+      assumptions: HISTORIC_ELECTRICITY_ASSUMPTIONS,
+      evidenceId: FACTURA_EVIDENCE_ID,
+      factor_id: "FE-S2-AR",
+      evidenciaIds: [FACTURA_EVIDENCE_ID],
+      updatedAt: new Date().toISOString()
+    });
+  });
+  pushLog("Carga histórico electricidad demo (13 meses)");
 }
 
 function pushLog(action) { state.changelog.unshift({ at: new Date().toISOString(), action, author: "Héctor Miguel Fadel" }); state.changelog = state.changelog.slice(0, 60); }
@@ -132,19 +204,81 @@ function renderScope1() {
 function renderSimpleScope(tab, label, idPrefix) {
   const scopeArr = tab === "scope2" ? state.scope2 : state.scope3; const filtered = filterByPeriod(scopeArr);
   const factorOpts = state.factores.filter((f) => f.alcance === tab).map((f) => `<option value="${f.id}">${f.nombre} (${f.valor})</option>`).join("");
-  const rows = filtered.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity || r.kwh || r.litros}</td><td>${tab === "scope2" ? t4(emissionS2(r)) : t4(emissionS3(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.updatedAt || "-"}</td>` : ""}<td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`).join("");
-  panel(tab).innerHTML = `<article class="card full"><h3>${label}</h3><div class="grid-form"><label>Fecha<input type="${tab === "scope2" ? "month" : "date"}" id="${idPrefix}-fecha"></label><label>${tab === "scope2" ? "kWh" : "Actividad"}<input id="${idPrefix}-${tab === "scope2" ? "kwh" : "activity"}"></label>${tab === "scope3" ? "<label>Litros<input type='number' id='s3-litros'></label>" : ""}<label>Factor<select id="${idPrefix}-factor">${factorOpts}</select></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><button id="save-${idPrefix}" type="button">Guardar</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Dato</th><th>tCO2e</th><th>Evidencias</th>${state.auditorMode ? "<th>Timestamp</th>" : ""}<th>Acciones</th></tr></thead><tbody>${rows || "<tr><td colspan='8'>Sin registros en período.</td></tr>"}</tbody></table></div></article>`;
+  const rows = filtered.map((r) => {
+    const quality = tab === "scope2" && r.dataQuality === "Estimado" ? '<span class="pill warning">Dato estimado / con supuestos</span>' : "-";
+    return `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity || r.kwh || r.litros}</td><td>${tab === "scope2" ? t4(emissionS2(r)) : t4(emissionS3(r))}</td><td>${quality}</td><td>${tab === "scope2" ? (r.assumptions || "-") : "-"}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.updatedAt || "-"}</td>` : ""}<td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`;
+  }).join("");
+  const dataQualityInput = tab === "scope2" ? `<label>Calidad de dato<select id="s2-quality"><option value="Medido">Medido</option><option value="Estimado">Estimado</option></select></label>` : "";
+  const assumptionsInput = tab === "scope2" ? `<label class="span-2">Supuestos<input id="s2-assumptions" placeholder="Detalle de supuestos"></label>` : "";
+  const sourceInput = tab === "scope2" ? `<label>Fuente<input id="s2-source" placeholder="Factura / Medidor"></label>` : "";
+  const demoActions = tab === "scope2" ? `<div class="btn-row"><button id="load-s2-demo" type="button" class="secondary">Cargar histórico desde factura (demo)</button></div>` : "";
+  panel(tab).innerHTML = `<article class="card full"><h3>${label}</h3><div class="grid-form"><label>Fecha<input type="${tab === "scope2" ? "month" : "date"}" id="${idPrefix}-fecha"></label><label>${tab === "scope2" ? "kWh" : "Actividad"}<input id="${idPrefix}-${tab === "scope2" ? "kwh" : "activity"}"></label>${tab === "scope3" ? "<label>Litros<input type='number' id='s3-litros'></label>" : ""}${sourceInput}${dataQualityInput}${assumptionsInput}<label>Factor<select id="${idPrefix}-factor">${factorOpts}</select></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><button id="save-${idPrefix}" type="button">Guardar</button></div>${demoActions}</article><article class="card full"><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Dato</th><th>tCO2e</th><th>Calidad</th><th>Supuestos</th><th>Evidencias</th>${state.auditorMode ? "<th>Timestamp</th>" : ""}<th>Acciones</th></tr></thead><tbody>${rows || "<tr><td colspan='10'>Sin registros en período.</td></tr>"}</tbody></table></div></article>`;
   document.getElementById(`save-${idPrefix}`).onclick = () => {
     const form = panel(tab).querySelector(".grid-form"); const ev = [...form.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
-    if (tab === "scope2") scopeArr.push({ id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, fecha: document.getElementById("s2-fecha").value, kwh: Number(document.getElementById("s2-kwh").value), factor_id: document.getElementById("s2-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
+    if (tab === "scope2") scopeArr.push({ id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, fecha: document.getElementById("s2-fecha").value, kwh: Number(document.getElementById("s2-kwh").value), source: document.getElementById("s2-source")?.value || "", dataQuality: document.getElementById("s2-quality")?.value || "Medido", assumptions: document.getElementById("s2-assumptions")?.value || "", evidenceId: ev[0] || "", factor_id: document.getElementById("s2-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
     if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, litros: Number(document.getElementById("s3-litros").value), factor_id: document.getElementById("s3-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
     pushLog(`Alta ${tab}`); renderAll();
   };
+  if (tab === "scope2") {
+    document.getElementById("load-s2-demo").onclick = () => { addHistoricElectricityDataset(); renderAll(); showToast("Histórico demo cargado en Scope 2"); };
+  }
   panel(tab).querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { const idx = scopeArr.findIndex((r) => r.id === b.dataset.del); if (idx >= 0) scopeArr.splice(idx, 1); renderAll(); });
 }
 
+
 async function hashFile(file) { const buffer = await file.arrayBuffer(); const hashBuffer = await crypto.subtle.digest("SHA-256", buffer); return [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, "0")).join(""); }
 function linkedRecordsByEvidenceId(id) { return allRecords().filter((r) => (r.evidenciaIds || []).includes(id)).map((r) => r.id); }
+
+
+function parseSimpleCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i += 1; }
+      else inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+    } else current += char;
+  }
+  cells.push(current);
+  return cells.map((c) => c.trim());
+}
+
+function importEvidenceCsv(text) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return 0;
+  const headers = parseSimpleCsvLine(lines[0]);
+  const idx = {
+    id: headers.indexOf("id"),
+    tipo: headers.indexOf("tipo"),
+    archivo_nombre: headers.indexOf("archivo"),
+    hash: headers.indexOf("hash"),
+    fecha_documento: headers.indexOf("fecha"),
+    url: headers.indexOf("url")
+  };
+  let imported = 0;
+  lines.slice(1).forEach((line) => {
+    const cells = parseSimpleCsvLine(line);
+    const row = {
+      id: idx.id >= 0 ? cells[idx.id] : "",
+      tipo: idx.tipo >= 0 ? cells[idx.tipo] : "",
+      archivo_nombre: idx.archivo_nombre >= 0 ? cells[idx.archivo_nombre] : "",
+      hash: idx.hash >= 0 ? cells[idx.hash] : "",
+      fecha_documento: idx.fecha_documento >= 0 ? cells[idx.fecha_documento] : "",
+      url: idx.url >= 0 ? cells[idx.url] : ""
+    };
+    if (!row.id) return;
+    const existing = state.evidencias.find((e) => e.id === row.id);
+    if (existing) Object.assign(existing, normalizeEvidence({ ...existing, ...row }));
+    else state.evidencias.push(normalizeEvidence(row));
+    imported += 1;
+  });
+  return imported;
+}
 
 function renderFactores() {
   panel("factores").innerHTML = `<article class="card full"><h3>Factores</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Scope</th><th>Nombre</th><th>Valor</th><th>Unidad</th></tr></thead><tbody>${state.factores.map((f) => `<tr><td>${f.id}</td><td>${f.alcance}</td><td>${f.nombre}</td><td><input data-id="${f.id}" type="number" step="0.001" value="${f.valor}"></td><td>${f.unidad}</td></tr>`).join("")}</tbody></table></div><div class="btn-row"><input id="fver" value="${state.meta.factorsVersion}"><button id="save-factors">Guardar factores</button></div></article>`;
@@ -152,24 +286,35 @@ function renderFactores() {
 }
 
 function renderEvidencias() {
-  panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias</h3><div class="grid-form"><label>Tipo<input id="ev-tipo"></label><label>Fecha<input type="date" id="ev-fecha"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">Vincular a registro<select id="ev-link"><option value="">(opcional)</option>${allRecords().map((r) => `<option value="${r.id}">${r.id}</option>`).join("")}</select></label><button type="button" id="save-ev">Guardar evidencia</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Archivo</th><th>Hash</th><th>Fecha</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => `<tr><td>${e.id}</td><td>${e.tipo}</td><td>${e.archivo_nombre}</td><td>${(e.hash || "").slice(0, 14)}...</td><td>${e.fecha_documento || "-"}</td><td>${linkedRecordsByEvidenceId(e.id).join(",") || "Sin vínculo"}</td><td><button class="danger" data-del="${e.id}">Eliminar</button></td></tr>`).join("") || "<tr><td colspan='7'>Sin evidencias.</td></tr>"}</tbody></table></div></article>`;
+  const facturaEvidence = ensureFacturaEvidence();
+  panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias</h3><div class="grid-form"><label>Tipo<input id="ev-tipo"></label><label>Fecha<input type="date" id="ev-fecha"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">URL<input id="ev-url" placeholder="https://..."></label><label class="span-2">Vincular a registro<select id="ev-link"><option value="">(opcional)</option>${allRecords().map((r) => `<option value="${r.id}">${r.id}</option>`).join("")}</select></label><button type="button" id="save-ev">Guardar evidencia</button></div></article><article class="card full"><h4>Evidencia demo factura EDET</h4><div class="grid-form"><label class="span-2">URL editable<input id="factura-edet-url" value="${facturaEvidence.url || ""}" placeholder="https://..."></label><button type="button" id="save-factura-edet-url">Guardar URL factura EDET</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Archivo</th><th>Hash</th><th>Fecha</th><th>URL</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => `<tr><td>${e.id}</td><td>${e.tipo}</td><td>${e.archivo_nombre}</td><td>${(e.hash || "").slice(0, 14)}...</td><td>${e.fecha_documento || "-"}</td><td>${e.url ? `<a href="${e.url}" target="_blank" rel="noopener">Ver</a>` : "Sin enlace"}</td><td>${linkedRecordsByEvidenceId(e.id).join(",") || "Sin vínculo"}</td><td><button class="danger" data-del="${e.id}">Eliminar</button></td></tr>`).join("") || "<tr><td colspan='8'>Sin evidencias.</td></tr>"}</tbody></table></div></article>`;
   document.getElementById("save-ev").onclick = async () => {
     const file = document.getElementById("ev-file").files[0]; if (!file) return showToast("Seleccioná archivo", "error");
-    const ev = { id: `EVD-${String(state.nextIds.evidencia++).padStart(3, "0")}`, tipo: document.getElementById("ev-tipo").value, archivo_nombre: file.name, hash: await hashFile(file), fecha_documento: document.getElementById("ev-fecha").value };
+    const ev = normalizeEvidence({ id: `EVD-${String(state.nextIds.evidencia++).padStart(3, "0")}`, tipo: document.getElementById("ev-tipo").value, archivo_nombre: file.name, hash: await hashFile(file), fecha_documento: document.getElementById("ev-fecha").value, url: document.getElementById("ev-url").value.trim() });
     state.evidencias.push(ev);
-    const link = document.getElementById("ev-link").value; if (link) { const rec = allRecords().find((r) => r.id === link); rec.evidenciaIds = [...new Set([...(rec.evidenciaIds || []), ev.id])]; }
+    const link = document.getElementById("ev-link").value; if (link) { const rec = allRecords().find((r) => r.id === link); rec.evidenciaIds = [...new Set([...(rec.evidenciaIds || []), ev.id])]; if (!rec.evidenceId) rec.evidenceId = ev.id; }
     pushLog(`Alta evidencia ${ev.id}`); renderAll();
   };
-  panel("evidencias").querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { state.evidencias = state.evidencias.filter((x) => x.id !== b.dataset.del); allRecords().forEach((r) => r.evidenciaIds = (r.evidenciaIds || []).filter((id) => id !== b.dataset.del)); renderAll(); });
+  document.getElementById("save-factura-edet-url").onclick = () => {
+    ensureFacturaEvidence(document.getElementById("factura-edet-url").value.trim());
+    pushLog("Actualización URL evidencia factura EDET");
+    renderAll();
+  };
+  panel("evidencias").querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+    if (b.dataset.del === FACTURA_EVIDENCE_ID) return showToast("La evidencia demo EDET no se puede eliminar", "error");
+    state.evidencias = state.evidencias.filter((x) => x.id !== b.dataset.del); allRecords().forEach((r) => r.evidenciaIds = (r.evidenciaIds || []).filter((id) => id !== b.dataset.del)); renderAll();
+  });
 }
+
 
 function scopeSummary(name, records, total) { return `<tr><td>${name}</td><td>${records.length}</td><td>${coverage(records).toFixed(1)}%</td><td>${dateRange(records)}</td><td>${t4(total)}</td></tr>`; }
 function renderReportes() {
   const s1 = filterByPeriod(allScope1Records()); const s2 = filterByPeriod(state.scope2); const s3 = filterByPeriod(state.scope3);
   const t1 = s1.reduce((a, r) => a + emissionS1(r), 0), t2 = s2.reduce((a, r) => a + emissionS2(r), 0), t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
-  panel("reportes").innerHTML = `<article class="card full"><h3>Reportes</h3><p><b>Período:</b> ${state.globalPeriod.from || "todo"} → ${state.globalPeriod.to || "todo"}</p><div class="table-wrap"><table><thead><tr><th>Scope</th><th>Registros</th><th>Cobertura</th><th>Rango fechas</th><th>tCO2e</th></tr></thead><tbody>${scopeSummary("Scope 1", s1, t1)}${scopeSummary("Scope 2", s2, t2)}${scopeSummary("Scope 3", s3, t3)}<tr><td><b>Total</b></td><td>${s1.length + s2.length + s3.length}</td><td>${coverage([...s1, ...s2, ...s3]).toFixed(1)}%</td><td>-</td><td><b>${t4(t1 + t2 + t3)}</b></td></tr></tbody></table></div><div class="btn-row"><button id="exp-json">Exportar JSON</button><button id="imp-json">Importar JSON</button><input id="imp-file" type="file" accept="application/json"><button id="exp-csv-period">Exportar CSV del período</button><button id="exp-csv-all">Exportar CSV completo</button><button id="gen-pdf">Generar informe PDF</button></div></article>`;
+  panel("reportes").innerHTML = `<article class="card full"><h3>Reportes</h3><p><b>Período:</b> ${state.globalPeriod.from || "todo"} → ${state.globalPeriod.to || "todo"}</p><div class="table-wrap"><table><thead><tr><th>Scope</th><th>Registros</th><th>Cobertura</th><th>Rango fechas</th><th>tCO2e</th></tr></thead><tbody>${scopeSummary("Scope 1", s1, t1)}${scopeSummary("Scope 2", s2, t2)}${scopeSummary("Scope 3", s3, t3)}<tr><td><b>Total</b></td><td>${s1.length + s2.length + s3.length}</td><td>${coverage([...s1, ...s2, ...s3]).toFixed(1)}%</td><td>-</td><td><b>${t4(t1 + t2 + t3)}</b></td></tr></tbody></table></div><div class="btn-row"><button id="exp-json">Exportar JSON</button><button id="imp-json">Importar JSON</button><input id="imp-file" type="file" accept="application/json"><button id="imp-ev-csv">Importar CSV evidencias</button><input id="imp-ev-file" type="file" accept=".csv,text/csv"><button id="exp-csv-period">Exportar CSV del período</button><button id="exp-csv-all">Exportar CSV completo</button><button id="gen-pdf">Generar informe PDF</button></div></article>`;
   document.getElementById("exp-json").onclick = () => downloadBlob(JSON.stringify(state, null, 2), "application/json", `${BRAND.toLowerCase()}-backup.json`);
-  document.getElementById("imp-json").onclick = async () => { const f = document.getElementById("imp-file").files[0]; if (!f) return; state = { ...initialState(), ...JSON.parse(await f.text()) }; renderAll(); };
+  document.getElementById("imp-json").onclick = async () => { const f = document.getElementById("imp-file").files[0]; if (!f) return; state = normalizeLoadedState(JSON.parse(await f.text())); renderAll(); };
+  document.getElementById("imp-ev-csv").onclick = async () => { const f = document.getElementById("imp-ev-file").files[0]; if (!f) return; const total = importEvidenceCsv(await f.text()); pushLog(`Import CSV evidencias (${total})`); renderAll(); showToast(`Evidencias importadas: ${total}`); };
   document.getElementById("exp-csv-period").onclick = () => exportCsv(true);
   document.getElementById("exp-csv-all").onclick = () => exportCsv(false);
   document.getElementById("gen-pdf").onclick = () => generatePdf();
@@ -178,6 +323,8 @@ function renderReportes() {
 function exportCsv(periodOnly) {
   const rows = (periodOnly ? [...filterByPeriod(allScope1Records()), ...filterByPeriod(state.scope2), ...filterByPeriod(state.scope3)] : [...allScope1Records(), ...state.scope2, ...state.scope3]).map((r) => [r.id, r.fecha, r.source || r.activity || "", r.input || r.kwh || r.litros || "", r.factor || r.factor_id || "", (r.id.startsWith("S1") ? emissionS1(r) : r.id.startsWith("S2") ? emissionS2(r) : emissionS3(r)).toFixed(4), (r.evidenciaIds || []).join("|")].join(","));
   downloadBlob(["id,fecha,fuente,entrada,factor,tco2e,evidencias", ...rows].join("\n"), "text/csv", `electrogreem-${periodOnly ? "periodo" : "completo"}.csv`);
+  const evidenceRows = state.evidencias.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "", e.url || "", linkedRecordsByEvidenceId(e.id).join("|")].map((v) => `"${String(v).replaceAll('"', '""')}"`).join(","));
+  downloadBlob(["id,tipo,archivo,hash,fecha,url,vinculos", ...evidenceRows].join("\n"), "text/csv", `electrogreem-evidencias-${periodOnly ? "periodo" : "completo"}.csv`);
 }
 function downloadBlob(content, type, filename) { const blob = new Blob([content], { type }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); URL.revokeObjectURL(a.href); }
 

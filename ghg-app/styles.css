@@ -23,10 +23,10 @@ h1{margin:0;font-size:1.2rem}p{margin:.15rem 0 0;color:var(--muted);font-size:.9
 .quick-row{grid-column:1/-1;display:flex;gap:.3rem;flex-wrap:wrap}
 .quick-row button{width:auto;padding:.35rem .55rem;font-size:.8rem}
 .tabs{display:flex;flex-wrap:wrap;gap:.55rem;padding:.7rem 1rem;border-bottom:1px solid var(--border);background:#f8f2ea}
-.tabs button{width:auto;display:flex;flex-direction:column;align-items:flex-start;gap:.12rem;background:#fffdf8;border:1px solid var(--border);border-radius:999px;padding:.45rem .95rem;color:#2f3a2f;line-height:1.15;transition:background-color .15s,border-color .15s,color .15s,box-shadow .15s}
+.tabs button{width:auto;display:flex;flex-direction:column;align-items:flex-start;gap:.12rem;background:#fffdf8;border:1px solid var(--border);border-radius:999px;padding:.45rem .95rem;color:#213021;line-height:1.15;transition:background-color .15s,border-color .15s,color .15s,box-shadow .15s}
 .tabs button .tab-title{font-size:.9rem;font-weight:650;color:inherit}
-.tabs button .tab-subtitle{font-size:.73rem;color:#4d5a4d;opacity:.95}
-.tabs button:hover{background:#f3eee4;border-color:#c4b39a;color:#263226}
+.tabs button .tab-subtitle{font-size:.73rem;color:#364936;opacity:1}
+.tabs button:hover{background:#f3eee4;border-color:#c4b39a;color:#1e2c1e}
 .tabs button:focus-visible{outline:none;border-color:var(--olive);box-shadow:0 0 0 3px rgba(79,107,69,.25);color:#223022}
 .tabs button:active{background:#e6eddd;border-color:#5f7755;color:#1e2b1e}
 .tabs button.active{background:#e8efdf;border-color:var(--olive);color:#223022;font-weight:700}
@@ -59,3 +59,5 @@ table{width:100%;border-collapse:collapse;background:#fff}th,td{border:1px solid
 #toast-container{position:fixed;right:1rem;bottom:1rem;display:grid;gap:.4rem}
 .toast{background:#fff;border:1px solid var(--border);padding:.5rem .7rem;border-radius:8px}.toast.error{border-color:var(--bad)}
 @media (max-width:1000px){.header-right{min-width:0;width:100%}.topbar{flex-direction:column;align-items:stretch}.period-grid{grid-template-columns:1fr 1fr}.card{grid-column:1/-1}.grid-form{grid-template-columns:1fr}.span-2{grid-column:1/-1}}
+
+.period-empty-banner{margin:.45rem 0 .65rem;border:1px solid #e8c592;background:#fff4e1;color:#7d5018;padding:.5rem .65rem;border-radius:8px;font-size:.86rem;font-weight:600}

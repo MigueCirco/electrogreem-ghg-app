@@ -1,6 +1,7 @@
-const STORAGE_KEY = "electrogreem-ghg-v12";
+const STORAGE_KEY = "electrogreem-ghg-v13";
 const APP_VERSION = "1.1.0";
 const BRAND = "ElectroGreem";
+const NO_DATA_MESSAGE = "Sin datos cargados en el período seleccionado";
 const HISTORIC_ELECTRICITY_ASSUMPTIONS = "Escala del gráfico asumida x10 (30=300 kWh). Meses asignados por orden izquierda→derecha; rótulos no legibles en la foto.";
 const HISTORIC_ELECTRICITY_SOURCE = "Factura EDET (histórico gráfico)";
 const FACTURA_EVIDENCE_ID = "EVD-FACTURA-EDET-001";
@@ -20,7 +21,6 @@ let state = loadState();
 const tabContainer = document.getElementById("tabs");
 const panels = [...document.querySelectorAll(".tab-panel")];
 
-init();
 
 function initialState() {
   const now = new Date().toISOString();
@@ -186,11 +186,21 @@ function allRecords() { return [...allAlcance1Records(), ...state.scope2.map((r)
 
 function emissionS1(r) { return (Number(r.input || 0) * Number(r.factor || 0)) / 1000; }
 function emissionS2(r) { return (Number(r.kwh || 0) / 1000) * Number(factorById(r.factor_id)?.valor || 0); }
-function emissionS3(r) { return (Number(r.litros || 0) * Number(factorById(r.factor_id)?.valor || 0)) / 1000; }
+function emissionS3(r) {
+  if (Number(r.tkm || 0) > 0 && r.metrica?.toLowerCase() === "tkm") return Number(r.tkm || 0) / 1000;
+  return (Number(r.litros || 0) * Number(factorById(r.factor_id)?.valor || 0)) / 1000;
+}
 
 function filterByPeriod(records) {
   const { from, to } = state.globalPeriod;
-  return records.filter((r) => { const d = normalizeDate(r.fecha); if (!d) return !(from || to); if (from && d < from) return false; if (to && d > to) return false; return true; });
+  return records.filter((r) => {
+    const startDate = normalizeDate(r.periodStart || r.fecha);
+    const endDate = normalizeDate(r.periodEnd || r.fecha);
+    if (!startDate && !endDate) return !(from || to);
+    if (from && endDate && endDate < from) return false;
+    if (to && startDate && startDate > to) return false;
+    return true;
+  });
 }
 function coverage(records) { if (!records.length) return 0; return (records.filter(hasEvidence).length / records.length) * 100; }
 function dateRange(records) { const dates = records.map((r) => normalizeDate(r.fecha)).filter(Boolean).sort(); return dates.length ? `${fmtDate(dates[0])} - ${fmtDate(dates[dates.length - 1])}` : "Sin fechas"; }
@@ -233,9 +243,9 @@ function renderAlcance1() {
   const el = panel("scope1"); const gwp = ["GWP-R410A", "GWP-R134a", "GWP-R32"]; const fuelEF = factorById("FE-S1-MEZCLA2T")?.valor || 2.31;
   const ref = filterByPeriod(state.scope1.refrigerants); const fuel = filterByPeriod(state.scope1.fuels);
   const auditorCols = state.auditorMode ? "<th>Factor ID</th><th>Timestamp</th>" : "";
-  const refRows = ref.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.source}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "manual"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="refrigerants" class="danger">Eliminar</button></td></tr>`).join("");
-  const fuelRows = fuel.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "FE-S1-MEZCLA2T"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="fuels" class="danger">Eliminar</button></td></tr>`).join("");
-  el.innerHTML = `<article class="card full"><h3>Alcance 1 (Directo) – Emisiones directas</h3><div class="grid-form"><label>Fecha<input type="date" id="s1r-fecha"></label><label>Equipo/Ubicación<input id="s1r-source"></label><label>Refrigerante<select id="s1r-type"><option value="GWP-R410A">R-410A</option><option value="GWP-R134a">R-134a</option><option value="GWP-R32">R-32</option><option value="OTRO">Otro</option></select></label><label>Kg recargados<input type="number" id="s1r-input" step="0.01"></label><label>GWP<input type="number" id="s1r-factor" step="0.01"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1r-notes"></label><button type="button" id="save-s1r">Guardar refrigerante</button></div><hr><div class="grid-form"><label>Fecha<input type="date" id="s1f-fecha"></label><label>Equipo/Actividad<input id="s1f-activity" value="Podadora"></label><label>Litros consumidos<input type="number" id="s1f-input" step="0.01"></label><label>EF kgCO2e/L<input type="number" id="s1f-factor" step="0.001" value="${fuelEF}"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1f-notes"></label><button type="button" id="save-s1f">Guardar combustible</button></div></article><article class="card full"><h3>Refrigerantes</h3><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Fuente</th><th>Entrada kg</th><th>GWP</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${refRows || "<tr><td colspan='11'>Sin registros en período.</td></tr>"}</tbody></table></div></article><article class="card full"><h3>Combustible</h3><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Actividad</th><th>Entrada L</th><th>EF</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${fuelRows || "<tr><td colspan='11'>Sin registros en período.</td></tr>"}</tbody></table></div></article>`;
+  const refRows = ref.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.source}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "manual"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="refrigerants" class="danger">Eliminar</button></td></tr>`).join("");
+  const fuelRows = fuel.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "FE-S1-MEZCLA2T"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="fuels" class="danger">Eliminar</button></td></tr>`).join("");
+  el.innerHTML = `<article class="card full"><h3>Alcance 1 (Directo) – Emisiones directas</h3><div class="btn-row"><button type="button" class="secondary" id="imp-s1-csv">Importar CSV</button><input id="imp-s1-file" type="file" accept=".csv,text/csv"></div><div class="grid-form"><label>Fecha<input type="date" id="s1r-fecha"></label><label>Equipo/Ubicación<input id="s1r-source"></label><label>Refrigerante<select id="s1r-type"><option value="GWP-R410A">R-410A</option><option value="GWP-R134a">R-134a</option><option value="GWP-R32">R-32</option><option value="OTRO">Otro</option></select></label><label>Kg recargados<input type="number" id="s1r-input" step="0.01"></label><label>GWP<input type="number" id="s1r-factor" step="0.01"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1r-notes"></label><button type="button" id="save-s1r">Guardar refrigerante</button></div><hr><div class="grid-form"><label>Fecha<input type="date" id="s1f-fecha"></label><label>Equipo/Actividad<input id="s1f-activity" value="Podadora"></label><label>Litros consumidos<input type="number" id="s1f-input" step="0.01"></label><label>EF kgCO2e/L<input type="number" id="s1f-factor" step="0.001" value="${fuelEF}"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1f-notes"></label><button type="button" id="save-s1f">Guardar combustible</button></div></article><article class="card full"><h3>Refrigerantes</h3>${showNoDataBanner(ref)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Fuente</th><th>Entrada kg</th><th>GWP</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${refRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article><article class="card full"><h3>Combustible</h3>${showNoDataBanner(fuel)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Actividad</th><th>Entrada L</th><th>EF</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${fuelRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article>`;
   const typeSel = document.getElementById("s1r-type"); const factorInput = document.getElementById("s1r-factor"); const setGwp = () => { if (typeSel.value !== "OTRO") factorInput.value = factorById(typeSel.value)?.valor || ""; }; typeSel.onchange = setGwp; setGwp();
   document.getElementById("save-s1r").onclick = () => {
     const ev = [...el.querySelectorAll("#save-s1r").item(0).closest(".grid-form").querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
@@ -247,6 +257,7 @@ function renderAlcance1() {
     state.scope1.fuels.push({ id: `S1-F-${String(state.nextIds.s1f++).padStart(3, "0")}`, fecha: document.getElementById("s1f-fecha").value, activity: document.getElementById("s1f-activity").value, input: Number(document.getElementById("s1f-input").value), factor: Number(document.getElementById("s1f-factor").value), factorId: "FE-S1-MEZCLA2T", evidenciaIds: ev, notes: document.getElementById("s1f-notes").value, updatedAt: new Date().toISOString() });
     pushLog("Alta Alcance 1 combustible"); renderAll();
   };
+  document.getElementById("imp-s1-csv").onclick = async () => { const f = document.getElementById("imp-s1-file").files[0]; if (!f) return; const total = importScope1Csv(await f.text()); pushLog(`Importar CSV Alcance 1 (${total})`); renderAll(); showToast(`Alcance 1 importado: ${total}`); };
   el.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { state.scope1[b.dataset.kind] = state.scope1[b.dataset.kind].filter((r) => r.id !== b.dataset.del); pushLog(`Eliminado ${b.dataset.del}`); renderAll(); });
 }
 
@@ -255,21 +266,27 @@ function renderSimpleAlcance(tab, label, idPrefix) {
   const factorOpts = state.factores.filter((f) => f.alcance === tab).map((f) => `<option value="${f.id}">${f.nombre} (${f.valor})</option>`).join("");
   const rows = filtered.map((r) => {
     const quality = tab === "scope2" && r.dataQuality === "Estimado" ? '<span class="pill alerta">Dato estimado / con supuestos</span>' : "-";
-    return `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity || r.kwh || r.litros}</td><td>${tab === "scope2" ? t4(emissionS2(r)) : t4(emissionS3(r))}</td><td>${quality}</td><td>${tab === "scope2" ? (r.assumptions || "-") : "-"}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.updatedAt || "-"}</td>` : ""}<td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`;
+    const dato = tab === "scope2" ? `${r.kwh} kWh` : (r.tkm ? `${r.tkm} tkm` : `${r.litros || 0} L`);
+    const periodo = tab === "scope2" && (r.periodStart || r.periodEnd) ? `${fmtDate(r.periodStart)} → ${fmtDate(r.periodEnd)}` : fmtDate(r.fecha);
+    return `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${periodo}</td><td>${dato}</td><td>${tab === "scope2" ? t4(emissionS2(r)) : t4(emissionS3(r))}</td><td>${quality}</td><td>${tab === "scope2" ? (r.assumptions || "-") : (r.assumptions || "-")}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.updatedAt || "-"}</td>` : ""}<td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`;
   }).join("");
   const dataQualityInput = tab === "scope2" ? `<label>Calidad de dato<select id="s2-quality"><option value="Medido">Medido</option><option value="Estimado">Estimado</option></select></label>` : "";
   const assumptionsInput = tab === "scope2" ? `<label class="span-2">Supuestos<input id="s2-assumptions" placeholder="Detalle de supuestos"></label>` : "";
   const sourceInput = tab === "scope2" ? `<label>Fuente<input id="s2-source" placeholder="Factura / Medidor"></label>` : "";
   const demoActions = tab === "scope2" ? `<div class="btn-row"><button id="load-s2-demo" type="button" class="secondary">Cargar histórico desde factura (demo)</button></div>` : "";
-  panel(tab).innerHTML = `<article class="card full"><h3>${label}</h3><div class="grid-form"><label>Fecha<input type="${tab === "scope2" ? "month" : "date"}" id="${idPrefix}-fecha"></label><label>${tab === "scope2" ? "kWh" : "Actividad"}<input id="${idPrefix}-${tab === "scope2" ? "kwh" : "activity"}"></label>${tab === "scope3" ? "<label>Litros<input type='number' id='s3-litros'></label>" : ""}${sourceInput}${dataQualityInput}${assumptionsInput}<label>Factor<select id="${idPrefix}-factor">${factorOpts}</select></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><button id="save-${idPrefix}" type="button">Guardar</button></div>${demoActions}</article><article class="card full"><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Dato</th><th>tCO2e</th><th>Calidad</th><th>Supuestos</th><th>Evidencias</th>${state.auditorMode ? "<th>Timestamp</th>" : ""}<th>Acciones</th></tr></thead><tbody>${rows || "<tr><td colspan='10'>Sin registros en período.</td></tr>"}</tbody></table></div></article>`;
+  const importControls = tab === "scope2" ? `<div class="btn-row"><button id="imp-s2-csv" type="button" class="secondary">Importar CSV</button><input id="imp-s2-file" type="file" accept=".csv,text/csv"></div>` : `<div class="btn-row"><button id="imp-s3-csv" type="button" class="secondary">Importar CSV</button><input id="imp-s3-file" type="file" accept=".csv,text/csv"></div>`;
+  panel(tab).innerHTML = `<article class="card full"><h3>${label}</h3>${importControls}<div class="grid-form"><label>Fecha<input type="${tab === "scope2" ? "month" : "date"}" id="${idPrefix}-fecha"></label><label>${tab === "scope2" ? "kWh" : "Actividad"}<input id="${idPrefix}-${tab === "scope2" ? "kwh" : "activity"}"></label>${tab === "scope3" ? "<label>Litros<input type='number' id='s3-litros'></label><label>tkm (opcional)<input type='number' id='s3-tkm' step='0.01'></label>" : ""}${sourceInput}${dataQualityInput}${assumptionsInput}<label>Factor<select id="${idPrefix}-factor">${factorOpts}</select></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><button id="save-${idPrefix}" type="button">Guardar</button></div>${demoActions}</article><article class="card full">${showNoDataBanner(filtered)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha/Período</th><th>Dato</th><th>tCO2e</th><th>Calidad</th><th>Supuestos</th><th>Evidencias</th>${state.auditorMode ? "<th>Timestamp</th>" : ""}<th>Acciones</th></tr></thead><tbody>${rows || "<tr><td colspan='11'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article>`;
   document.getElementById(`save-${idPrefix}`).onclick = () => {
     const form = panel(tab).querySelector(".grid-form"); const ev = [...form.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
     if (tab === "scope2") scopeArr.push({ id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, fecha: document.getElementById("s2-fecha").value, kwh: Number(document.getElementById("s2-kwh").value), source: document.getElementById("s2-source")?.value || "", dataQuality: document.getElementById("s2-quality")?.value || "Medido", assumptions: document.getElementById("s2-assumptions")?.value || "", evidenceId: ev[0] || "", factor_id: document.getElementById("s2-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
-    if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, litros: Number(document.getElementById("s3-litros").value), factor_id: document.getElementById("s3-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
+    if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, litros: Number(document.getElementById("s3-litros").value), tkm: Number(document.getElementById("s3-tkm")?.value || 0), metrica: Number(document.getElementById("s3-tkm")?.value || 0) > 0 ? "tkm" : "litros", factor_id: document.getElementById("s3-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
     pushLog(`Alta ${tab}`); renderAll();
   };
   if (tab === "scope2") {
     document.getElementById("load-s2-demo").onclick = () => { addHistoricElectricityDataset(); renderAll(); showToast("Histórico demo cargado en Alcance 2 (Electricidad)"); };
+    document.getElementById("imp-s2-csv").onclick = async () => { const f = document.getElementById("imp-s2-file").files[0]; if (!f) return; const total = importScope2Csv(await f.text()); pushLog(`Importar CSV Alcance 2 (${total})`); renderAll(); showToast(`Alcance 2 importado: ${total}`); };
+  } else {
+    document.getElementById("imp-s3-csv").onclick = async () => { const f = document.getElementById("imp-s3-file").files[0]; if (!f) return; const total = importScope3Csv(await f.text()); pushLog(`Importar CSV Alcance 3 (${total})`); renderAll(); showToast(`Alcance 3 importado: ${total}`); };
   }
   panel(tab).querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { const idx = scopeArr.findIndex((r) => r.id === b.dataset.del); if (idx >= 0) scopeArr.splice(idx, 1); renderAll(); });
 }
@@ -297,39 +314,187 @@ function parseSimpleCsvLine(line) {
   return cells.map((c) => c.trim());
 }
 
-function importEvidenceCsv(text) {
+function parseCsvRows(text) {
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return 0;
+  if (lines.length < 2) return [];
   const headers = parseSimpleCsvLine(lines[0]);
-  const idx = {
-    id: headers.indexOf("id"),
-    tipo: headers.indexOf("tipo"),
-    archivo_nombre: headers.indexOf("archivo"),
-    hash: headers.indexOf("hash"),
-    fecha_documento: headers.indexOf("fecha"),
-    url: headers.indexOf("url"),
-    drive_file_id: headers.indexOf("drive_file_id"),
-    url_view: headers.indexOf("url_view"),
-    url_download: headers.indexOf("url_download")
-  };
-  let imported = 0;
-  lines.slice(1).forEach((line) => {
+  return lines.slice(1).map((line) => {
     const cells = parseSimpleCsvLine(line);
-    const row = {
-      id: idx.id >= 0 ? cells[idx.id] : "",
-      tipo: idx.tipo >= 0 ? cells[idx.tipo] : "",
-      archivo_nombre: idx.archivo_nombre >= 0 ? cells[idx.archivo_nombre] : "",
-      hash: idx.hash >= 0 ? cells[idx.hash] : "",
-      fecha_documento: idx.fecha_documento >= 0 ? cells[idx.fecha_documento] : "",
-      url: idx.url >= 0 ? cells[idx.url] : "",
-      drive_file_id: idx.drive_file_id >= 0 ? cells[idx.drive_file_id] : "",
-      url_view: idx.url_view >= 0 ? cells[idx.url_view] : "",
-      url_download: idx.url_download >= 0 ? cells[idx.url_download] : ""
+    const row = {};
+    headers.forEach((header, index) => { row[header.trim()] = (cells[index] || "").trim(); });
+    return row;
+  });
+}
+
+
+function parseNumber(value) {
+  if (value === null || value === undefined || value === "") return 0;
+  const normalized = String(value).replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function validIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? value : "";
+}
+
+function validMonthStart(value) {
+  return /^\d{4}-\d{2}$/.test(value || "") ? `${value}-01` : validIsoDate(value);
+}
+
+function parseEvidenceIds(row) {
+  return [row.evidencia_id, row.evidence_id].filter(Boolean).join("|").split("|").map((v) => v.trim()).filter(Boolean);
+}
+
+function resolveEvidenceUrl(...values) {
+  for (const value of values) {
+    if (String(value || "").trim()) return String(value).trim();
+  }
+  return "";
+}
+
+function showNoDataBanner(records) {
+  if (records.length) return "";
+  return `<div class="period-empty-banner">${NO_DATA_MESSAGE}</div>`;
+}
+
+function nextScopeCode(scope) {
+  if (scope === "s1r") return `S1-R-${String(state.nextIds.s1r++).padStart(3, "0")}`;
+  if (scope === "s1f") return `S1-F-${String(state.nextIds.s1f++).padStart(3, "0")}`;
+  if (scope === "scope2") return `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`;
+  return `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`;
+}
+
+function importScope1Csv(text) {
+  const rows = parseCsvRows(text);
+  let imported = 0;
+  rows.forEach((row) => {
+    const evidenceUrl = resolveEvidenceUrl(row.evidencia_url, row.evidence_url);
+    const evidenciaIds = parseEvidenceIds(row);
+    const fecha = validIsoDate(row.fecha);
+    const base = {
+      fecha,
+      evidenciaIds,
+      evidenceId: evidenciaIds[0] || "",
+      sourceCsvId: row.id_actividad || "",
+      sourceCsvCode: row.id_actividad || "",
+      codigo: row.id_actividad || "",
+      source: row.fuente || row.detalle || row.equipo || "",
+      notes: row.nota || "",
+      sourceLabel: row.fuente_dato || "CSV",
+      evidenceUrl,
+      updatedAt: new Date().toISOString()
     };
-    if (!row.id) return;
-    const existing = state.evidencias.find((e) => e.id === row.id);
-    if (existing) Object.assign(existing, normalizeEvidence({ ...existing, ...row }));
-    else state.evidencias.push(normalizeEvidence(row));
+    if (row.refrigerante_tipo || row.masa_kg || row.gwp_100y) {
+      state.scope1.refrigerants.push({
+        id: nextScopeCode("s1r"),
+        refType: row.refrigerante_tipo || "OTRO",
+        input: parseNumber(row.masa_kg),
+        factor: parseNumber(row.gwp_100y),
+        factorId: row.refrigerante_tipo || "manual",
+        ...base
+      });
+      imported += 1;
+      return;
+    }
+    state.scope1.fuels.push({
+      id: nextScopeCode("s1f"),
+      activity: row.detalle || row.combustible_tipo || row.equipo || "Combustible",
+      input: parseNumber(row.litros),
+      factor: factorById("FE-S1-MEZCLA2T")?.valor || 0,
+      factorId: "FE-S1-MEZCLA2T",
+      fuelType: row.combustible_tipo || "",
+      ...base
+    });
+    imported += 1;
+  });
+  return imported;
+}
+
+function importScope2Csv(text) {
+  const rows = parseCsvRows(text);
+  let imported = 0;
+  rows.forEach((row) => {
+    const evidenciaIds = parseEvidenceIds(row);
+    const fechaInicio = validIsoDate(row.fecha_inicio);
+    const fechaFin = validIsoDate(row.fecha_fin);
+    const periodo = validMonthStart(row.periodo_mes) || fechaInicio || fechaFin;
+    state.scope2.push({
+      id: nextScopeCode("scope2"),
+      fecha: periodo,
+      periodStart: fechaInicio,
+      periodEnd: fechaFin,
+      kwh: parseNumber(row.kwh),
+      source: row.proveedor || row.fuente_dato || "Electricidad",
+      dataQuality: row.dato_sintetico === "true" || row.dato_sintetico === "1" ? "Estimado" : "Medido",
+      assumptions: row.nota || "",
+      evidenceId: evidenciaIds[0] || "",
+      evidenciaIds,
+      evidenceUrl: resolveEvidenceUrl(row.evidencia_url, row.evidence_url),
+      sourceCsvId: row.id_actividad || "",
+      codigo: row.id_actividad || "",
+      factor_id: "FE-S2-AR",
+      updatedAt: new Date().toISOString()
+    });
+    imported += 1;
+  });
+  return imported;
+}
+
+function importScope3Csv(text) {
+  const rows = parseCsvRows(text);
+  let imported = 0;
+  rows.forEach((row) => {
+    const evidenciaIds = parseEvidenceIds(row);
+    state.scope3.push({
+      id: nextScopeCode("scope3"),
+      fecha: validIsoDate(row.fecha),
+      activity: row.cliente || row.vehiculo_modelo || row.id_servicio || "Transporte",
+      codigo: row.id_servicio || "",
+      sourceCsvId: row.id_servicio || "",
+      km_recorridos: parseNumber(row.km_recorridos),
+      km_ida_vacio: parseNumber(row.km_ida_vacio),
+      km_regreso_con_carga: parseNumber(row.km_regreso_con_carga),
+      carga_kg: parseNumber(row.carga_kg),
+      metrica: row.metrica || "",
+      tkm: parseNumber(row.tkm),
+      litros: parseNumber(row.litros_estimados),
+      fuelType: row.combustible_tipo || "",
+      rendimiento_km_por_l: parseNumber(row.rendimiento_km_por_l),
+      source: row.fuente_dato || "CSV",
+      assumptions: row.nota || "",
+      evidenceId: evidenciaIds[0] || "",
+      evidenciaIds,
+      evidenceUrl: resolveEvidenceUrl(row.evidencia_url, row.evidence_url),
+      factor_id: "FE-S3-DIESEL",
+      updatedAt: new Date().toISOString()
+    });
+    imported += 1;
+  });
+  return imported;
+}
+
+function importEvidenceCsv(text) {
+  const rows = parseCsvRows(text);
+  let imported = 0;
+  rows.forEach((row) => {
+    const evidenceId = row.evidencia_id || row.id || "";
+    if (!evidenceId) return;
+    const normalizedRow = normalizeEvidence({
+      id: evidenceId,
+      tipo: row.tipo || "",
+      archivo_nombre: row.archivo_nombre || row.archivo || "",
+      hash: row.hash_sha256 || row.hash || "",
+      fecha_documento: validIsoDate(row.fecha_documento || ""),
+      url: resolveEvidenceUrl(row.url, row.evidencia_url),
+      url_view: resolveEvidenceUrl(row.url, row.url_view, row.evidencia_url),
+      url_download: row.url_download || "",
+      nota_auditoria: row.observaciones || "",
+      alcance: row.alcance || ""
+    });
+    const existing = state.evidencias.find((e) => e.id === normalizedRow.id);
+    if (existing) Object.assign(existing, normalizedRow);
+    else state.evidencias.push(normalizedRow);
     imported += 1;
   });
   return imported;
@@ -342,10 +507,10 @@ function renderFactores() {
 
 function renderEvidencias() {
   const facturaEvidence = ensureFacturaEvidence();
-  panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias</h3><div class="grid-form"><label>Tipo<input id="ev-tipo"></label><label>Alcance<select id="ev-alcance"><option value="">(seleccionar)</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option></select></label><label>Período desde<input type="date" id="ev-periodo-desde"></label><label>Período hasta<input type="date" id="ev-periodo-hasta"></label><label>Proveedor / Origen<input id="ev-proveedor" placeholder="Proveedor, entidad o fuente"></label><label>Fecha documento<input type="date" id="ev-fecha"></label><label class="span-2">Nota de auditoría<input id="ev-nota-auditoria" placeholder="Observaciones de trazabilidad"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">Pegar link de Drive<input id="ev-drive-link" placeholder="https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing"></label><label class="span-2">URL vista<input id="ev-url-view" placeholder="https://..."></label><label class="span-2">URL descarga<input id="ev-url-download" placeholder="https://..."></label><label class="span-2">Vincular a registro<select id="ev-link"><option value="">(opcional)</option>${allRecords().map((r) => `<option value="${r.id}">${r.id}</option>`).join("")}</select></label><div class="btn-row span-2"><a class="button-like secondary" href="${DRIVE_FOLDER_URL}" target="_blank" rel="noopener">Subir evidencia a Drive</a><button type="button" id="save-ev">Guardar evidencia</button></div></div></article><article class="card full"><h4>Evidencia demo factura EDET</h4><div class="grid-form"><label class="span-2">URL editable<input id="factura-edet-url" value="${facturaEvidence.url_view || ""}" placeholder="https://..."></label><button type="button" id="save-factura-edet-url">Guardar URL factura EDET</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Alcance</th><th>Periodo</th><th>Proveedor/Origen</th><th>Nota auditoría</th><th>Archivo</th><th>Ver/Descargar</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => {
+  panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias</h3><div class="btn-row"><button id="imp-evidencias-csv" type="button" class="secondary">Importar CSV</button><input id="imp-evidencias-file" type="file" accept=".csv,text/csv"></div><div class="grid-form"><label>Tipo<input id="ev-tipo"></label><label>Alcance<select id="ev-alcance"><option value="">(seleccionar)</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option></select></label><label>Período desde<input type="date" id="ev-periodo-desde"></label><label>Período hasta<input type="date" id="ev-periodo-hasta"></label><label>Proveedor / Origen<input id="ev-proveedor" placeholder="Proveedor, entidad o fuente"></label><label>Fecha documento<input type="date" id="ev-fecha"></label><label class="span-2">Nota de auditoría<input id="ev-nota-auditoria" placeholder="Observaciones de trazabilidad"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">Pegar link de Drive<input id="ev-drive-link" placeholder="https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing"></label><label class="span-2">URL vista<input id="ev-url-view" placeholder="https://..."></label><label class="span-2">URL descarga<input id="ev-url-download" placeholder="https://..."></label><label class="span-2">Vincular a registro<select id="ev-link"><option value="">(opcional)</option>${allRecords().map((r) => `<option value="${r.id}">${r.id}</option>`).join("")}</select></label><div class="btn-row span-2"><a class="button-like secondary" href="${DRIVE_FOLDER_URL}" target="_blank" rel="noopener">Subir evidencia a Drive</a><button type="button" id="save-ev">Guardar evidencia</button></div></div></article><article class="card full"><h4>Evidencia demo factura EDET</h4><div class="grid-form"><label class="span-2">URL editable<input id="factura-edet-url" value="${facturaEvidence.url_view || ""}" placeholder="https://..."></label><button type="button" id="save-factura-edet-url">Guardar URL factura EDET</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Alcance</th><th>Periodo</th><th>Proveedor/Origen</th><th>Nota auditoría</th><th>Archivo</th><th>Ver/Descargar</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => {
     const periodo = e.periodo_desde || e.periodo_hasta ? `${e.periodo_desde || "-"} / ${e.periodo_hasta || "-"}` : "-";
-    const viewAction = e.url_view ? `<a href="${e.url_view}" target="_blank" rel="noopener">Ver</a>` : "Sin evidencia cargada";
-    const downloadAction = e.url_download ? `<a href="${e.url_download}" target="_blank" rel="noopener">Descargar</a>` : "Sin evidencia cargada";
+    const viewAction = e.url_view ? `<a href="${e.url_view}" target="_blank" rel="noopener">Abrir evidencia</a>` : "Sin enlace";
+    const downloadAction = e.url_download ? `<a href="${e.url_download}" target="_blank" rel="noopener">Descargar</a>` : "Sin enlace";
     return `<tr><td>${e.id}</td><td>${e.tipo || "-"}</td><td>${e.alcance || "-"}</td><td>${periodo}</td><td>${e.proveedor || "-"}</td><td>${e.nota_auditoria || "-"}</td><td>${e.archivo_nombre || "-"}</td><td class="evidence-actions">${viewAction}<span>·</span>${downloadAction}</td><td>${linkedRecordsByEvidenceId(e.id).join(",") || "Sin vínculo"}</td><td><button class="danger" data-del="${e.id}">Eliminar</button></td></tr>`;
   }).join("") || "<tr><td colspan='10'>Sin evidencias.</td></tr>"}</tbody></table></div></article>`;
 
@@ -401,6 +566,8 @@ function renderEvidencias() {
     renderAll();
   };
 
+  document.getElementById("imp-evidencias-csv").onclick = async () => { const f = document.getElementById("imp-evidencias-file").files[0]; if (!f) return; const total = importEvidenceCsv(await f.text()); pushLog(`Importar CSV evidencias (${total})`); renderAll(); showToast(`Evidencias importadas: ${total}`); };
+
   panel("evidencias").querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
     if (b.dataset.del === FACTURA_EVIDENCE_ID) return showToast("La evidencia demo EDET no se puede eliminar", "error");
     state.evidencias = state.evidencias.filter((x) => x.id !== b.dataset.del);
@@ -414,10 +581,9 @@ function scopeSummary(name, records, total) { return `<tr><td>${name}</td><td>${
 function renderInformes() {
   const s1 = filterByPeriod(allAlcance1Records()); const s2 = filterByPeriod(state.scope2); const s3 = filterByPeriod(state.scope3);
   const t1 = s1.reduce((a, r) => a + emissionS1(r), 0), t2 = s2.reduce((a, r) => a + emissionS2(r), 0), t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
-  panel("reportes").innerHTML = `<article class="card full"><h3>Informes</h3><p><b>Período:</b> ${state.globalPeriod.from || "todo"} → ${state.globalPeriod.to || "todo"}</p><div class="table-wrap"><table><thead><tr><th>Alcance</th><th>Registros</th><th>Cobertura</th><th>Rango de fechas</th><th>tCO2e</th></tr></thead><tbody>${scopeSummary("Alcance 1 (Directo)", s1, t1)}${scopeSummary("Alcance 2 (Electricidad)", s2, t2)}${scopeSummary("Alcance 3 (Indirecto: Transporte y otros)", s3, t3)}<tr><td><b>Total</b></td><td>${s1.length + s2.length + s3.length}</td><td>${coverage([...s1, ...s2, ...s3]).toFixed(1)}%</td><td>-</td><td><b>${t4(t1 + t2 + t3)}</b></td></tr></tbody></table></div><div class="btn-row"><button id="exp-json">Exportar JSON</button><button id="imp-json">Importar JSON</button><input id="imp-file" type="file" accept="application/json"><button id="imp-ev-csv">Importar CSV evidencias</button><input id="imp-ev-file" type="file" accept=".csv,text/csv"><button id="exp-csv-period">Exportar CSV del período</button><button id="exp-csv-all">Exportar CSV completo</button><button id="gen-pdf">Generar informe PDF</button></div></article>`;
+  panel("reportes").innerHTML = `<article class="card full"><h3>Informes</h3><p><b>Período:</b> ${state.globalPeriod.from || "todo"} → ${state.globalPeriod.to || "todo"}</p><div class="table-wrap"><table><thead><tr><th>Alcance</th><th>Registros</th><th>Cobertura</th><th>Rango de fechas</th><th>tCO2e</th></tr></thead><tbody>${scopeSummary("Alcance 1 (Directo)", s1, t1)}${scopeSummary("Alcance 2 (Electricidad)", s2, t2)}${scopeSummary("Alcance 3 (Indirecto: Transporte y otros)", s3, t3)}<tr><td><b>Total</b></td><td>${s1.length + s2.length + s3.length}</td><td>${coverage([...s1, ...s2, ...s3]).toFixed(1)}%</td><td>-</td><td><b>${t4(t1 + t2 + t3)}</b></td></tr></tbody></table></div><div class="btn-row"><button id="exp-json">Exportar JSON</button><button id="imp-json">Importar JSON</button><input id="imp-file" type="file" accept="application/json"><button id="exp-csv-period">Exportar CSV del período</button><button id="exp-csv-all">Exportar CSV completo</button><button id="gen-pdf">Generar informe PDF</button></div></article>`;
   document.getElementById("exp-json").onclick = () => downloadBlob(JSON.stringify(state, null, 2), "application/json", `${BRAND.toLowerCase()}-backup.json`);
   document.getElementById("imp-json").onclick = async () => { const f = document.getElementById("imp-file").files[0]; if (!f) return; state = normalizeLoadedState(JSON.parse(await f.text())); renderAll(); };
-  document.getElementById("imp-ev-csv").onclick = async () => { const f = document.getElementById("imp-ev-file").files[0]; if (!f) return; const total = importEvidenceCsv(await f.text()); pushLog(`Importar CSV evidencias (${total})`); renderAll(); showToast(`Evidencias importadas: ${total}`); };
   document.getElementById("exp-csv-period").onclick = () => exportCsv(true);
   document.getElementById("exp-csv-all").onclick = () => exportCsv(false);
   document.getElementById("gen-pdf").onclick = () => generatePdf();
@@ -433,7 +599,7 @@ function downloadBlob(content, type, filename) { const blob = new Blob([content]
 
 function pdfAlcanceTable(doc, y, title, records, mapper) {
   doc.setFontSize(14); doc.text(title, 14, y); y += 6;
-  if (!records.length) { doc.setFillColor(250, 237, 223); doc.rect(14, y, 182, 15, "F"); doc.setFontSize(10); doc.text("Sin registros para el período seleccionado. (Esto no implica cero emisiones; implica ausencia de datos cargados en la herramienta.)", 16, y + 8, { maxWidth: 178 }); return y + 20; }
+  if (!records.length) { doc.setFillColor(250, 237, 223); doc.rect(14, y, 182, 15, "F"); doc.setFontSize(10); doc.text(`${NO_DATA_MESSAGE}.`, 16, y + 8, { maxWidth: 178 }); return y + 20; }
   doc.autoTable({ startY: y, theme: "grid", styles: { font: "helvetica", fontSize: 9, lineColor: [216, 203, 184], lineWidth: 0.1 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Fecha", "Fuente/Actividad", "Entrada", "Factor", "tCO2e", "Evidencias"]], body: records.map(mapper) });
   return doc.lastAutoTable.finalY + 8;
 }
@@ -454,7 +620,7 @@ function generatePdf() {
   y = pdfAlcanceTable(doc, y, "Alcance 1 (Directo)", s1, (r) => [fmtDate(r.fecha), r.source || r.activity || "-", `${r.input} ${r.kind === "refrigerant" ? "kg" : "L"}`, `${r.factor}`, t4(emissionS1(r)), (r.evidenciaIds || []).join("|") || "-"]);
   y = pdfAlcanceTable(doc, y, "Alcance 2 (Electricidad)", s2, (r) => [fmtDate(r.fecha), "Electricidad", `${r.kwh} kWh`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS2(r)), (r.evidenciaIds || []).join("|") || "-"]);
   if (y > 250) { doc.addPage(); y = 20; }
-  y = pdfAlcanceTable(doc, y, "Alcance 3 (Indirecto: Transporte y otros)", s3, (r) => [fmtDate(r.fecha), r.activity || "-", `${r.litros} L`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS3(r)), (r.evidenciaIds || []).join("|") || "-"]);
+  y = pdfAlcanceTable(doc, y, "Alcance 3 (Indirecto: Transporte y otros)", s3, (r) => [fmtDate(r.fecha), r.activity || "-", r.tkm ? `${r.tkm} tkm` : `${r.litros} L`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS3(r)), (r.evidenciaIds || []).join("|") || "-"]);
 
   doc.autoTable({ startY: y + 3, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Factores utilizados", "Valor", "Unidad"]], body: state.factores.map((f) => [f.id, String(f.valor), f.unidad]) });
   const recordsInPeriod = [...s1, ...s2, ...s3];
@@ -462,10 +628,10 @@ function generatePdf() {
   let sectionY = doc.lastAutoTable.finalY + 4;
   if (!evidenciasPeriodo.length) {
     doc.setFontSize(10);
-    doc.text("Sin evidencias para el periodo seleccionado", 14, sectionY + 6);
+    doc.text(NO_DATA_MESSAGE, 14, sectionY + 6);
     sectionY += 10;
   } else {
-    doc.autoTable({ startY: sectionY, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: evidenciasPeriodo.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", linkedRecordsByEvidenceId(e.id).join("|") || "-"]) });
+    doc.autoTable({ startY: sectionY, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: evidenciasPeriodo.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", e.url_view ? `Abrir evidencia: ${e.url_view}` : "Sin enlace"]) });
     sectionY = doc.lastAutoTable.finalY + 4;
   }
   doc.autoTable({ startY: sectionY, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Registro de cambios", "Acción", "Autor"]], body: state.changelog.slice(0, 20).map((c) => [new Date(c.at).toLocaleString("es-AR"), c.action, c.author]) });
@@ -492,3 +658,5 @@ function renderAll() {
   renderConfig();
   saveState();
 }
+
+init();

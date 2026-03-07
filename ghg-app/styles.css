@@ -202,3 +202,38 @@ button.danger { background: var(--danger); border-color: var(--danger); }
   .grid-form { grid-template-columns: 1fr; }
   .span-2 { grid-column: span 1; }
 }
+
+ul { color: var(--accent-strong); }
+
+.evidence-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .35rem;
+  border: 1px solid var(--border);
+  border-radius: .5rem;
+  padding: .5rem;
+  background: var(--bg);
+}
+
+#toast-container {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  display: grid;
+  gap: .5rem;
+  z-index: 50;
+}
+
+.toast {
+  padding: .55rem .8rem;
+  border-radius: .55rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: .85rem;
+}
+
+.toast.error {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}

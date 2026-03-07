@@ -1,635 +1,234 @@
-const STORAGE_KEY = "electrogreem-ghg-v11";
-const APP_VERSION = "1.0.0";
+const STORAGE_KEY = "electrogreem-ghg-v12";
+const APP_VERSION = "1.1.0";
 const BRAND = "ElectroGreem";
 
-const tabs = [
-  ["inicio", "Inicio / Guía"],
-  ["scope1", "Emisiones directas (Scope 1)"],
-  ["scope2", "Scope 2"],
-  ["scope3", "Scope 3"],
-  ["factores", "Factores"],
-  ["evidencias", "Evidencias"],
-  ["reportes", "Reportes"],
-  ["config", "Configuración"]
-];
+const tabs = [["inicio", "Inicio / Instructivo"], ["scope1", "Scope 1 · Emisiones directas"], ["scope2", "Scope 2"], ["scope3", "Scope 3"], ["factores", "Factores"], ["evidencias", "Evidencias"], ["reportes", "Reportes"], ["config", "Configuración"]];
 
 let state = loadState();
 const tabContainer = document.getElementById("tabs");
 const panels = [...document.querySelectorAll(".tab-panel")];
+
 init();
 
 function initialState() {
   const now = new Date().toISOString();
   return {
     meta: { appVersion: APP_VERSION, createdAt: now, factorsVersion: "v1", factorsUpdatedAt: now },
-    nextIds: { scope1: 1, scope2: 1, scope3: 1, evidencia: 1 },
+    nextIds: { s1r: 1, s1f: 1, scope2: 1, scope3: 1, evidencia: 1 },
     factores: [
-      { id: "FE-S2-AR", alcance: "scope2", nombre: "Electricidad red AR", valor: 0.32, unidad: "tCO2e/MWh", editable: true },
-      { id: "FE-S3-DIESEL", alcance: "scope3", nombre: "Transporte diésel", valor: 2.68, unidad: "kgCO2e/L", editable: true },
-      { id: "GWP-R410A", alcance: "scope1", nombre: "Refrigerante R-410A", valor: 2088, unidad: "GWP", editable: true },
-      { id: "GWP-R134a", alcance: "scope1", nombre: "Refrigerante R-134a", valor: 1430, unidad: "GWP", editable: true },
-      { id: "GWP-R32", alcance: "scope1", nombre: "Refrigerante R-32", valor: 675, unidad: "GWP", editable: true },
-      { id: "FE-S1-MEZCLA2T", alcance: "scope1", nombre: "Combustible nafta/mezcla 2T", valor: 2.31, unidad: "kgCO2e/L", editable: true }
+      { id: "FE-S2-AR", alcance: "scope2", nombre: "Electricidad red AR", valor: 0.32, unidad: "tCO2e/MWh" },
+      { id: "FE-S3-DIESEL", alcance: "scope3", nombre: "Transporte diésel", valor: 2.68, unidad: "kgCO2e/L" },
+      { id: "GWP-R410A", alcance: "scope1", nombre: "R-410A", valor: 2088, unidad: "GWP" },
+      { id: "GWP-R134a", alcance: "scope1", nombre: "R-134a", valor: 1430, unidad: "GWP" },
+      { id: "GWP-R32", alcance: "scope1", nombre: "R-32", valor: 675, unidad: "GWP" },
+      { id: "FE-S1-MEZCLA2T", alcance: "scope1", nombre: "Mezcla 2T", valor: 2.31, unidad: "kgCO2e/L" }
     ],
-    scope1: [],
+    scope1: { refrigerants: [], fuels: [] },
     scope2: [],
     scope3: [],
     evidencias: [],
     changelog: [{ at: now, action: "Inicialización", author: "Sistema" }],
-    reportFilter: { from: "", to: "", onlyWithEvidence: false, enabled: false }
+    globalPeriod: { from: "", to: "" },
+    auditorMode: false
   };
-}
-
-function init() {
-  renderTabs();
-  renderAll();
-  activateTab("inicio");
 }
 
 function loadState() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return initialState();
-    return { ...initialState(), ...JSON.parse(saved) };
-  } catch {
-    return initialState();
-  }
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    const base = initialState();
+    const merged = { ...base, ...saved };
+    merged.scope1 = merged.scope1 || { refrigerants: JSON.parse(localStorage.getItem("eg_s1_refrigerants") || "[]"), fuels: JSON.parse(localStorage.getItem("eg_s1_fuels") || "[]") };
+    merged.globalPeriod = {
+      from: merged.globalPeriod?.from || localStorage.getItem("eg_period_from") || "",
+      to: merged.globalPeriod?.to || localStorage.getItem("eg_period_to") || ""
+    };
+    return merged;
+  } catch { return initialState(); }
 }
 
 function saveState() {
-  state.meta.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem("eg_s1_refrigerants", JSON.stringify(state.scope1.refrigerants));
+  localStorage.setItem("eg_s1_fuels", JSON.stringify(state.scope1.fuels));
+  localStorage.setItem("eg_period_from", state.globalPeriod.from || "");
+  localStorage.setItem("eg_period_to", state.globalPeriod.to || "");
 }
 
-function pushLog(action) {
-  state.changelog.unshift({ at: new Date().toISOString(), action, author: "Héctor Miguel Fadel" });
-  state.changelog = state.changelog.slice(0, 40);
-}
-
-function showToast(message, type = "success") {
-  const container = document.getElementById("toast-container");
-  const node = document.createElement("div");
-  node.className = `toast ${type}`;
-  node.textContent = message;
-  container.appendChild(node);
-  setTimeout(() => node.remove(), 3500);
-}
-
+function pushLog(action) { state.changelog.unshift({ at: new Date().toISOString(), action, author: "Héctor Miguel Fadel" }); state.changelog = state.changelog.slice(0, 60); }
 function panel(name) { return document.querySelector(`.tab-panel[data-tab="${name}"]`); }
 function factorById(id) { return state.factores.find((f) => f.id === id); }
-function evidenceById(id) { return state.evidencias.find((e) => e.id === id); }
+function showToast(message, type = "success") { const node = document.createElement("div"); node.className = `toast ${type}`; node.textContent = message; document.getElementById("toast-container").appendChild(node); setTimeout(() => node.remove(), 3000); }
+function normalizeDate(v) { if (!v) return ""; return /^\d{4}-\d{2}$/.test(v) ? `${v}-01` : v; }
+function fmtDate(v) { return normalizeDate(v) ? new Date(normalizeDate(v)).toLocaleDateString("es-AR") : "-"; }
+function t4(n) { return Number(n || 0).toFixed(4); }
+function hasEvidence(r) { return (r.evidenciaIds || []).length > 0; }
+function allScope1Records() { return [...state.scope1.refrigerants.map((r) => ({ ...r, kind: "refrigerant" })), ...state.scope1.fuels.map((r) => ({ ...r, kind: "fuel" }))]; }
+function allRecords() { return [...allScope1Records(), ...state.scope2.map((r) => ({ ...r, scope: "scope2" })), ...state.scope3.map((r) => ({ ...r, scope: "scope3" }))]; }
 
-function renderTabs() {
-  tabContainer.innerHTML = "";
-  tabs.forEach(([key, label]) => {
-    const btn = document.createElement("button");
-    btn.textContent = label;
-    btn.dataset.tab = key;
-    btn.onclick = () => activateTab(key);
-    tabContainer.appendChild(btn);
+function emissionS1(r) { return (Number(r.input || 0) * Number(r.factor || 0)) / 1000; }
+function emissionS2(r) { return (Number(r.kwh || 0) / 1000) * Number(factorById(r.factor_id)?.valor || 0); }
+function emissionS3(r) { return (Number(r.litros || 0) * Number(factorById(r.factor_id)?.valor || 0)) / 1000; }
+
+function filterByPeriod(records) {
+  const { from, to } = state.globalPeriod;
+  return records.filter((r) => { const d = normalizeDate(r.fecha); if (!d) return !(from || to); if (from && d < from) return false; if (to && d > to) return false; return true; });
+}
+function coverage(records) { if (!records.length) return 0; return (records.filter(hasEvidence).length / records.length) * 100; }
+function dateRange(records) { const dates = records.map((r) => normalizeDate(r.fecha)).filter(Boolean).sort(); return dates.length ? `${fmtDate(dates[0])} - ${fmtDate(dates[dates.length - 1])}` : "Sin fechas"; }
+
+function init() { renderTabs(); renderAll(); activateTab("inicio"); }
+function renderTabs() { tabContainer.innerHTML = tabs.map(([key, label]) => `<button data-tab="${key}">${label}</button>`).join(""); tabContainer.querySelectorAll("button").forEach((b) => b.onclick = () => activateTab(b.dataset.tab)); }
+function activateTab(key) { document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === key)); panels.forEach((p) => p.classList.toggle("active", p.dataset.tab === key)); }
+
+function renderGlobalPeriod() {
+  const el = document.getElementById("global-period");
+  el.innerHTML = `<div class="period-grid"><label>Desde<input type="date" id="gp-from" value="${state.globalPeriod.from || ""}"></label><label>Hasta<input type="date" id="gp-to" value="${state.globalPeriod.to || ""}"></label><button id="gp-apply">Aplicar</button><button id="gp-clear" class="secondary">Limpiar</button><div class="quick-row"><button data-quick="30">Últimos 30 días</button><button data-quick="month">Mes actual</button><button data-quick="quarter">Trimestre actual</button><button data-quick="year">Año actual</button></div></div>`;
+  document.getElementById("gp-apply").onclick = () => { state.globalPeriod.from = document.getElementById("gp-from").value; state.globalPeriod.to = document.getElementById("gp-to").value; pushLog("Filtro global aplicado"); renderAll(); };
+  document.getElementById("gp-clear").onclick = () => { state.globalPeriod = { from: "", to: "" }; renderAll(); };
+  el.querySelectorAll("[data-quick]").forEach((btn) => btn.onclick = () => {
+    const now = new Date(); let from = "", to = now.toISOString().slice(0, 10);
+    if (btn.dataset.quick === "30") from = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+    if (btn.dataset.quick === "month") from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    if (btn.dataset.quick === "quarter") { const qStart = Math.floor(now.getMonth() / 3) * 3; from = `${now.getFullYear()}-${String(qStart + 1).padStart(2, "0")}-01`; }
+    if (btn.dataset.quick === "year") from = `${now.getFullYear()}-01-01`;
+    state.globalPeriod = { from, to }; renderAll();
   });
 }
 
-function activateTab(key) {
-  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === key));
-  panels.forEach((p) => p.classList.toggle("active", p.dataset.tab === key));
+function renderInicio() {
+  const s1 = filterByPeriod(allScope1Records());
+  const s2 = filterByPeriod(state.scope2);
+  const s3 = filterByPeriod(state.scope3);
+  const t1 = s1.reduce((a, r) => a + emissionS1(r), 0); const t2 = s2.reduce((a, r) => a + emissionS2(r), 0); const t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
+  const pending = [["Scope 1", s1], ["Scope 2", s2], ["Scope 3", s3]].map(([n, r]) => `<li>${n}: faltan evidencias en ${r.filter((x) => !hasEvidence(x)).length} registros.</li>`).join("");
+  panel("inicio").innerHTML = `<article class="card full"><h3>ElectroGreem GHG App · Inicio / Instructivo</h3><p><b>Autor:</b> Héctor Miguel Fadel · <b>Contexto:</b> Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT) · <b>Tutor/Supervisión:</b> Prof. Ing. Ramón Oris · <b>Agradecimientos:</b> Búho Producciones Artísticas.</p><p>Esta app estática permite inventario GEI operativo Scope 1/2/3 con trazabilidad por evidencias, registro de cambios y respaldo JSON/CSV.</p><h4>Supuestos y límites</h4><ul><li>Depende de datos de actividad y factores cargados por el usuario.</li><li>Límites organizacionales: operaciones y activos declarados.</li><li>La ausencia de datos no implica ausencia de emisiones.</li></ul><h4>Validez</h4><ul><li>Trazabilidad mediante evidencias con hash.</li><li>Registro de cambios y versión de factores.</li><li>Export/Import JSON y export CSV como respaldo auditable.</li></ul><h4>Mini guía</h4><ol><li>Cargar factores.</li><li>Cargar actividades Scope 1/2/3.</li><li>Adjuntar evidencias.</li><li>Elegir período global.</li><li>Generar informe PDF.</li></ol></article><article class="card"><h3>Total</h3><div class="metric">${t4(t1 + t2 + t3)} tCO2e</div></article><article class="card"><h3>Scope 1</h3><div class="metric">${t4(t1)}</div><p>${s1.length} registros · cobertura ${coverage(s1).toFixed(1)}%</p></article><article class="card"><h3>Scope 2</h3><div class="metric">${t4(t2)}</div><p>${s2.length} registros · cobertura ${coverage(s2).toFixed(1)}%</p></article><article class="card"><h3>Scope 3</h3><div class="metric">${t4(t3)}</div><p>${s3.length} registros · cobertura ${coverage(s3).toFixed(1)}%</p></article><article class="card full"><h3>Pendientes de datos</h3><ul>${pending}</ul></article>`;
 }
 
-function calcScope1Emission(record) {
-  if (record.fuente === "refrigerante") return (Number(record.cantidad || 0) * Number(record.factor_emision || 0)) / 1000;
-  const litros = Number(record.cantidad || 0);
-  return (litros * Number(record.factor_emision || 0)) / 1000;
+function evidenceSelectorHtml(selected = []) { if (!state.evidencias.length) return "<small>Sin evidencias cargadas.</small>"; return `<div class="evidence-links">${state.evidencias.map((ev) => `<label><input type="checkbox" value="${ev.id}" name="evidenciaIds" ${selected.includes(ev.id) ? "checked" : ""}>${ev.id} · ${ev.archivo_nombre}</label>`).join("")}</div>`; }
+function evidenceIndicator(record) { return hasEvidence(record) ? "✅" : "⚠️"; }
+
+function renderScope1() {
+  const el = panel("scope1"); const gwp = ["GWP-R410A", "GWP-R134a", "GWP-R32"]; const fuelEF = factorById("FE-S1-MEZCLA2T")?.valor || 2.31;
+  const ref = filterByPeriod(state.scope1.refrigerants); const fuel = filterByPeriod(state.scope1.fuels);
+  const auditorCols = state.auditorMode ? "<th>Factor ID</th><th>Timestamp</th>" : "";
+  const refRows = ref.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.source}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "manual"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="refrigerants" class="danger">Eliminar</button></td></tr>`).join("");
+  const fuelRows = fuel.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity}</td><td>${r.input}</td><td>${r.factor}</td><td>${t4(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "FE-S1-MEZCLA2T"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="fuels" class="danger">Eliminar</button></td></tr>`).join("");
+  el.innerHTML = `<article class="card full"><h3>Scope 1 – Emisiones directas</h3><div class="grid-form"><label>Fecha<input type="date" id="s1r-fecha"></label><label>Equipo/Ubicación<input id="s1r-source"></label><label>Refrigerante<select id="s1r-type"><option value="GWP-R410A">R-410A</option><option value="GWP-R134a">R-134a</option><option value="GWP-R32">R-32</option><option value="OTRO">Otro</option></select></label><label>Kg recargados<input type="number" id="s1r-input" step="0.01"></label><label>GWP<input type="number" id="s1r-factor" step="0.01"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1r-notes"></label><button type="button" id="save-s1r">Guardar refrigerante</button></div><hr><div class="grid-form"><label>Fecha<input type="date" id="s1f-fecha"></label><label>Equipo/Actividad<input id="s1f-activity" value="Podadora"></label><label>Litros consumidos<input type="number" id="s1f-input" step="0.01"></label><label>EF kgCO2e/L<input type="number" id="s1f-factor" step="0.001" value="${fuelEF}"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1f-notes"></label><button type="button" id="save-s1f">Guardar combustible</button></div></article><article class="card full"><h3>Refrigerantes</h3><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Fuente</th><th>Entrada kg</th><th>GWP</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${refRows || "<tr><td colspan='11'>Sin registros en período.</td></tr>"}</tbody></table></div></article><article class="card full"><h3>Combustible</h3><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Actividad</th><th>Entrada L</th><th>EF</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${fuelRows || "<tr><td colspan='11'>Sin registros en período.</td></tr>"}</tbody></table></div></article>`;
+  const typeSel = document.getElementById("s1r-type"); const factorInput = document.getElementById("s1r-factor"); const setGwp = () => { if (typeSel.value !== "OTRO") factorInput.value = factorById(typeSel.value)?.valor || ""; }; typeSel.onchange = setGwp; setGwp();
+  document.getElementById("save-s1r").onclick = () => {
+    const ev = [...el.querySelectorAll("#save-s1r").item(0).closest(".grid-form").querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
+    state.scope1.refrigerants.push({ id: `S1-R-${String(state.nextIds.s1r++).padStart(3, "0")}`, fecha: document.getElementById("s1r-fecha").value, source: document.getElementById("s1r-source").value, refType: typeSel.value, input: Number(document.getElementById("s1r-input").value), factor: Number(factorInput.value), factorId: typeSel.value, evidenciaIds: ev, notes: document.getElementById("s1r-notes").value, updatedAt: new Date().toISOString() });
+    pushLog("Alta Scope 1 refrigerante"); renderAll();
+  };
+  document.getElementById("save-s1f").onclick = () => {
+    const secondForm = el.querySelectorAll(".grid-form")[1]; const ev = [...secondForm.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
+    state.scope1.fuels.push({ id: `S1-F-${String(state.nextIds.s1f++).padStart(3, "0")}`, fecha: document.getElementById("s1f-fecha").value, activity: document.getElementById("s1f-activity").value, input: Number(document.getElementById("s1f-input").value), factor: Number(document.getElementById("s1f-factor").value), factorId: "FE-S1-MEZCLA2T", evidenciaIds: ev, notes: document.getElementById("s1f-notes").value, updatedAt: new Date().toISOString() });
+    pushLog("Alta Scope 1 combustible"); renderAll();
+  };
+  el.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { state.scope1[b.dataset.kind] = state.scope1[b.dataset.kind].filter((r) => r.id !== b.dataset.del); pushLog(`Eliminado ${b.dataset.del}`); renderAll(); });
 }
 
-function calcScope2Emission(record) {
-  const factor = factorById(record.factor_id);
-  return (Number(record.kwh || 0) / 1000) * Number(factor?.valor || 0);
+function renderSimpleScope(tab, label, idPrefix) {
+  const scopeArr = tab === "scope2" ? state.scope2 : state.scope3; const filtered = filterByPeriod(scopeArr);
+  const factorOpts = state.factores.filter((f) => f.alcance === tab).map((f) => `<option value="${f.id}">${f.nombre} (${f.valor})</option>`).join("");
+  const rows = filtered.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity || r.kwh || r.litros}</td><td>${tab === "scope2" ? t4(emissionS2(r)) : t4(emissionS3(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.updatedAt || "-"}</td>` : ""}<td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`).join("");
+  panel(tab).innerHTML = `<article class="card full"><h3>${label}</h3><div class="grid-form"><label>Fecha<input type="${tab === "scope2" ? "month" : "date"}" id="${idPrefix}-fecha"></label><label>${tab === "scope2" ? "kWh" : "Actividad"}<input id="${idPrefix}-${tab === "scope2" ? "kwh" : "activity"}"></label>${tab === "scope3" ? "<label>Litros<input type='number' id='s3-litros'></label>" : ""}<label>Factor<select id="${idPrefix}-factor">${factorOpts}</select></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><button id="save-${idPrefix}" type="button">Guardar</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Fecha</th><th>Dato</th><th>tCO2e</th><th>Evidencias</th>${state.auditorMode ? "<th>Timestamp</th>" : ""}<th>Acciones</th></tr></thead><tbody>${rows || "<tr><td colspan='8'>Sin registros en período.</td></tr>"}</tbody></table></div></article>`;
+  document.getElementById(`save-${idPrefix}`).onclick = () => {
+    const form = panel(tab).querySelector(".grid-form"); const ev = [...form.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
+    if (tab === "scope2") scopeArr.push({ id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, fecha: document.getElementById("s2-fecha").value, kwh: Number(document.getElementById("s2-kwh").value), factor_id: document.getElementById("s2-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
+    if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, litros: Number(document.getElementById("s3-litros").value), factor_id: document.getElementById("s3-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
+    pushLog(`Alta ${tab}`); renderAll();
+  };
+  panel(tab).querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { const idx = scopeArr.findIndex((r) => r.id === b.dataset.del); if (idx >= 0) scopeArr.splice(idx, 1); renderAll(); });
 }
 
-function calcScope3Emission(record) {
-  const factor = factorById(record.factor_id);
-  const litros = Number(record.litros || 0);
-  return (litros * Number(factor?.valor || 0)) / 1000;
+async function hashFile(file) { const buffer = await file.arrayBuffer(); const hashBuffer = await crypto.subtle.digest("SHA-256", buffer); return [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, "0")).join(""); }
+function linkedRecordsByEvidenceId(id) { return allRecords().filter((r) => (r.evidenciaIds || []).includes(id)).map((r) => r.id); }
+
+function renderFactores() {
+  panel("factores").innerHTML = `<article class="card full"><h3>Factores</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Scope</th><th>Nombre</th><th>Valor</th><th>Unidad</th></tr></thead><tbody>${state.factores.map((f) => `<tr><td>${f.id}</td><td>${f.alcance}</td><td>${f.nombre}</td><td><input data-id="${f.id}" type="number" step="0.001" value="${f.valor}"></td><td>${f.unidad}</td></tr>`).join("")}</tbody></table></div><div class="btn-row"><input id="fver" value="${state.meta.factorsVersion}"><button id="save-factors">Guardar factores</button></div></article>`;
+  document.getElementById("save-factors").onclick = () => { panel("factores").querySelectorAll("[data-id]").forEach((i) => { factorById(i.dataset.id).valor = Number(i.value); }); state.meta.factorsVersion = document.getElementById("fver").value; state.meta.factorsUpdatedAt = new Date().toISOString(); pushLog("Factores actualizados"); renderAll(); };
 }
 
-function coverage(records, idKey) {
-  if (!records.length) return 0;
-  const withEv = records.filter((r) => (r.evidenciaIds || []).length > 0).length;
-  return (withEv / records.length) * 100;
+function renderEvidencias() {
+  panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias</h3><div class="grid-form"><label>Tipo<input id="ev-tipo"></label><label>Fecha<input type="date" id="ev-fecha"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">Vincular a registro<select id="ev-link"><option value="">(opcional)</option>${allRecords().map((r) => `<option value="${r.id}">${r.id}</option>`).join("")}</select></label><button type="button" id="save-ev">Guardar evidencia</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Archivo</th><th>Hash</th><th>Fecha</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => `<tr><td>${e.id}</td><td>${e.tipo}</td><td>${e.archivo_nombre}</td><td>${(e.hash || "").slice(0, 14)}...</td><td>${e.fecha_documento || "-"}</td><td>${linkedRecordsByEvidenceId(e.id).join(",") || "Sin vínculo"}</td><td><button class="danger" data-del="${e.id}">Eliminar</button></td></tr>`).join("") || "<tr><td colspan='7'>Sin evidencias.</td></tr>"}</tbody></table></div></article>`;
+  document.getElementById("save-ev").onclick = async () => {
+    const file = document.getElementById("ev-file").files[0]; if (!file) return showToast("Seleccioná archivo", "error");
+    const ev = { id: `EVD-${String(state.nextIds.evidencia++).padStart(3, "0")}`, tipo: document.getElementById("ev-tipo").value, archivo_nombre: file.name, hash: await hashFile(file), fecha_documento: document.getElementById("ev-fecha").value };
+    state.evidencias.push(ev);
+    const link = document.getElementById("ev-link").value; if (link) { const rec = allRecords().find((r) => r.id === link); rec.evidenciaIds = [...new Set([...(rec.evidenciaIds || []), ev.id])]; }
+    pushLog(`Alta evidencia ${ev.id}`); renderAll();
+  };
+  panel("evidencias").querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { state.evidencias = state.evidencias.filter((x) => x.id !== b.dataset.del); allRecords().forEach((r) => r.evidenciaIds = (r.evidenciaIds || []).filter((id) => id !== b.dataset.del)); renderAll(); });
 }
 
-function evidenceSelectorHtml(selected = []) {
-  if (!state.evidencias.length) return "<small>Sin evidencias cargadas.</small>";
-  return `<div class="evidence-links">${state.evidencias.map((ev) => `<label><input type="checkbox" name="evidenciaIds" value="${ev.id}" ${selected.includes(ev.id) ? "checked" : ""}/> ${ev.id} · ${ev.archivo_nombre}</label>`).join("")}</div>`;
+function scopeSummary(name, records, total) { return `<tr><td>${name}</td><td>${records.length}</td><td>${coverage(records).toFixed(1)}%</td><td>${dateRange(records)}</td><td>${t4(total)}</td></tr>`; }
+function renderReportes() {
+  const s1 = filterByPeriod(allScope1Records()); const s2 = filterByPeriod(state.scope2); const s3 = filterByPeriod(state.scope3);
+  const t1 = s1.reduce((a, r) => a + emissionS1(r), 0), t2 = s2.reduce((a, r) => a + emissionS2(r), 0), t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
+  panel("reportes").innerHTML = `<article class="card full"><h3>Reportes</h3><p><b>Período:</b> ${state.globalPeriod.from || "todo"} → ${state.globalPeriod.to || "todo"}</p><div class="table-wrap"><table><thead><tr><th>Scope</th><th>Registros</th><th>Cobertura</th><th>Rango fechas</th><th>tCO2e</th></tr></thead><tbody>${scopeSummary("Scope 1", s1, t1)}${scopeSummary("Scope 2", s2, t2)}${scopeSummary("Scope 3", s3, t3)}<tr><td><b>Total</b></td><td>${s1.length + s2.length + s3.length}</td><td>${coverage([...s1, ...s2, ...s3]).toFixed(1)}%</td><td>-</td><td><b>${t4(t1 + t2 + t3)}</b></td></tr></tbody></table></div><div class="btn-row"><button id="exp-json">Exportar JSON</button><button id="imp-json">Importar JSON</button><input id="imp-file" type="file" accept="application/json"><button id="exp-csv-period">Exportar CSV del período</button><button id="exp-csv-all">Exportar CSV completo</button><button id="gen-pdf">Generar informe PDF</button></div></article>`;
+  document.getElementById("exp-json").onclick = () => downloadBlob(JSON.stringify(state, null, 2), "application/json", `${BRAND.toLowerCase()}-backup.json`);
+  document.getElementById("imp-json").onclick = async () => { const f = document.getElementById("imp-file").files[0]; if (!f) return; state = { ...initialState(), ...JSON.parse(await f.text()) }; renderAll(); };
+  document.getElementById("exp-csv-period").onclick = () => exportCsv(true);
+  document.getElementById("exp-csv-all").onclick = () => exportCsv(false);
+  document.getElementById("gen-pdf").onclick = () => generatePdf();
+}
+
+function exportCsv(periodOnly) {
+  const rows = (periodOnly ? [...filterByPeriod(allScope1Records()), ...filterByPeriod(state.scope2), ...filterByPeriod(state.scope3)] : [...allScope1Records(), ...state.scope2, ...state.scope3]).map((r) => [r.id, r.fecha, r.source || r.activity || "", r.input || r.kwh || r.litros || "", r.factor || r.factor_id || "", (r.id.startsWith("S1") ? emissionS1(r) : r.id.startsWith("S2") ? emissionS2(r) : emissionS3(r)).toFixed(4), (r.evidenciaIds || []).join("|")].join(","));
+  downloadBlob(["id,fecha,fuente,entrada,factor,tco2e,evidencias", ...rows].join("\n"), "text/csv", `electrogreem-${periodOnly ? "periodo" : "completo"}.csv`);
+}
+function downloadBlob(content, type, filename) { const blob = new Blob([content], { type }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); URL.revokeObjectURL(a.href); }
+
+function pdfScopeTable(doc, y, title, records, mapper) {
+  doc.setFontSize(14); doc.text(title, 14, y); y += 6;
+  if (!records.length) { doc.setFillColor(250, 237, 223); doc.rect(14, y, 182, 15, "F"); doc.setFontSize(10); doc.text("Sin registros para el período seleccionado. (Esto no implica cero emisiones; implica ausencia de datos cargados en la herramienta.)", 16, y + 8, { maxWidth: 178 }); return y + 20; }
+  doc.autoTable({ startY: y, theme: "grid", styles: { font: "helvetica", fontSize: 9, lineColor: [216, 203, 184], lineWidth: 0.1 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Fecha", "Fuente/Actividad", "Entrada", "Factor", "tCO2e", "Evidencias"]], body: records.map(mapper) });
+  return doc.lastAutoTable.finalY + 8;
+}
+
+function generatePdf() {
+  const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const s1 = filterByPeriod(allScope1Records()), s2 = filterByPeriod(state.scope2), s3 = filterByPeriod(state.scope3);
+  const t1 = s1.reduce((a, r) => a + emissionS1(r), 0), t2 = s2.reduce((a, r) => a + emissionS2(r), 0), t3 = s3.reduce((a, r) => a + emissionS3(r), 0);
+  const period = state.globalPeriod.from || state.globalPeriod.to ? `${state.globalPeriod.from || "inicio"} a ${state.globalPeriod.to || "actual"}` : "todo";
+
+  doc.setFillColor(244, 239, 230); doc.rect(0, 0, 210, 297, "F"); doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.text("ElectroGreem GHG App – Inventario de GEI (Scope 1/2/3)", 14, 22);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text([`Autor: Héctor Miguel Fadel`, "Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT)", "Tutor/Supervisión: Prof. Ing. Ramón Oris", `Versión ${APP_VERSION} · Generado ${new Date().toLocaleString("es-AR")}`, `Período aplicado: ${period}`], 14, 34);
+  doc.setFont("helvetica", "bold"); doc.text("Resumen ejecutivo", 14, 62); doc.setFont("helvetica", "normal");
+  doc.autoTable({ startY: 66, theme: "grid", styles: { font: "helvetica", fontSize: 9 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Scope", "tCO2e", "Cobertura evidencias"]], body: [["Scope 1", t4(t1), `${coverage(s1).toFixed(1)}%`], ["Scope 2", t4(t2), `${coverage(s2).toFixed(1)}%`], ["Scope 3", t4(t3), `${coverage(s3).toFixed(1)}%`], ["Total", t4(t1 + t2 + t3), `${coverage([...s1, ...s2, ...s3]).toFixed(1)}%`]] });
+  doc.text("Supuestos y límites", 14, doc.lastAutoTable.finalY + 8); doc.setFontSize(9); doc.text(["• Depende de datos de actividad y factores cargados.", "• Límites organizacionales declarados por el usuario.", "• No incluye emisiones no registradas en la herramienta."], 14, doc.lastAutoTable.finalY + 14);
+  let y = doc.lastAutoTable.finalY + 30;
+
+  y = pdfScopeTable(doc, y, "Scope 1 – Emisiones directas", s1, (r) => [fmtDate(r.fecha), r.source || r.activity || "-", `${r.input} ${r.kind === "refrigerant" ? "kg" : "L"}`, `${r.factor}`, t4(emissionS1(r)), (r.evidenciaIds || []).join("|") || "-"]);
+  y = pdfScopeTable(doc, y, "Scope 2 – Electricidad", s2, (r) => [fmtDate(r.fecha), "Electricidad", `${r.kwh} kWh`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS2(r)), (r.evidenciaIds || []).join("|") || "-"]);
+  if (y > 250) { doc.addPage(); y = 20; }
+  y = pdfScopeTable(doc, y, "Scope 3 – Operaciones indirectas", s3, (r) => [fmtDate(r.fecha), r.activity || "-", `${r.litros} L`, `${factorById(r.factor_id)?.valor || "-"}`, t4(emissionS3(r)), (r.evidenciaIds || []).join("|") || "-"]);
+
+  doc.autoTable({ startY: y + 3, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Factores utilizados", "Valor", "Unidad"]], body: state.factores.map((f) => [f.id, String(f.valor), f.unidad]) });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: state.evidencias.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", linkedRecordsByEvidenceId(e.id).join("|") || "-"]) });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY + 4, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Registro de cambios", "Acción", "Autor"]], body: state.changelog.slice(0, 20).map((c) => [new Date(c.at).toLocaleString("es-AR"), c.action, c.author]) });
+
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i += 1) { doc.setPage(i); doc.setFontSize(8); doc.text(`ElectroGreem · Informe GEI · v${APP_VERSION}`, 14, 8); doc.text(`Generado ${new Date().toLocaleString("es-AR")}`, 14, 292); doc.text(`Página ${i} de ${pages}`, 175, 292); }
+  doc.save(`ElectroGreem_Informe_GEI_${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+function renderConfig() {
+  panel("config").innerHTML = `<article class="card full"><h3>Configuración</h3><label><input type="checkbox" id="auditor-mode" ${state.auditorMode ? "checked" : ""}> Modo auditor (columnas extra: ID interno, hash/timestamp/factor ID)</label><h3>Pruebas rápidas</h3><ul><li>Caso 1: Período sin datos ⇒ PDF muestra “Sin registros…”.</li><li>Caso 2: 1 refrigerante + evidencia ⇒ S1>0, cobertura S1=100%.</li><li>Caso 3: combustible sin evidencia ⇒ cobertura baja y warning.</li><li>Caso 4: Export JSON / Import JSON ⇒ mantiene período, datos, evidencias y changelog.</li></ul></article>`;
+  document.getElementById("auditor-mode").onchange = (e) => { state.auditorMode = e.target.checked; renderAll(); };
 }
 
 function renderAll() {
+  renderGlobalPeriod();
   renderInicio();
   renderScope1();
-  renderScope2();
-  renderScope3();
+  renderSimpleScope("scope2", "Scope 2 · Electricidad", "s2");
+  renderSimpleScope("scope3", "Scope 3 · Operaciones indirectas", "s3");
   renderFactores();
   renderEvidencias();
   renderReportes();
   renderConfig();
   saveState();
-}
-
-function renderInicio() {
-  const el = panel("inicio");
-  const currentFilter = getActiveReportFilter();
-  const data = reportRecords(currentFilter.from, currentFilter.to, currentFilter.onlyWithEvidence);
-  const total1 = data.s1.reduce((a, r) => a + calcScope1Emission(r), 0);
-  const total2 = data.s2.reduce((a, r) => a + calcScope2Emission(r), 0);
-  const total3 = data.s3.reduce((a, r) => a + calcScope3Emission(r), 0);
-  const total = total1 + total2 + total3;
-  const globalCoverage = coverage([...data.s1, ...data.s2, ...data.s3]);
-  const periodText = currentFilter.enabled ? `${currentFilter.from || "inicio"} a ${currentFilter.to || "actual"}` : "Todo el historial";
-  const warnNoDate = data.excludedNoDate > 0 ? `<small class="report-warning">${data.excludedNoDate} registros sin fecha excluidos por filtro activo.</small>` : "";
-
-  el.innerHTML = `
-  <article class="card full">
-    <h3>Guía rápida · ${BRAND} GHG App – Inventario de GEI (Scope 1/2/3)</h3>
-    <p>Esta aplicación permite registrar emisiones operativas, gestionar trazabilidad documental y generar un informe profesional imprimible para auditoría.</p>
-    <ul>
-      <li><b>Pestañas:</b> Scope 1, Scope 2, Scope 3, Factores, Evidencias, Reportes y Configuración.</li>
-      <li><b>Alcances incluidos:</b> Scope 1/2/3 operativos. <b>Límite organizacional:</b> instalaciones y operaciones propias declaradas por el usuario.</li>
-      <li><b>Metodología:</b> electricidad (kWh→tCO2e), combustible (L→tCO2e), refrigerante (kg×GWP→tCO2e).</li>
-      <li><b>Validez:</b> trazabilidad por evidencias vinculadas + registro de cambios + timestamp de factores.</li>
-      <li><b>Aviso:</b> la calidad de resultados depende de la calidad del dato de entrada y de los factores configurados.</li>
-    </ul>
-    <p><b>Período activo:</b> ${periodText} · <b>Modo:</b> ${currentFilter.onlyWithEvidence ? "solo con evidencias" : "con y sin evidencias"}</p>
-    ${warnNoDate}
-  </article>
-  <article class="card"><h3>Total general</h3><div class="metric">${total.toFixed(3)} tCO2e</div></article>
-  <article class="card"><h3>Scope 1</h3><div class="metric">${total1.toFixed(3)} tCO2e</div><small>${data.s1.length} registros · cobertura ${coverage(data.s1).toFixed(1)}%</small></article>
-  <article class="card"><h3>Scope 2</h3><div class="metric">${total2.toFixed(3)} tCO2e</div><small>${data.s2.length} registros · cobertura ${coverage(data.s2).toFixed(1)}%</small></article>
-  <article class="card"><h3>Scope 3</h3><div class="metric">${total3.toFixed(3)} tCO2e</div><small>${data.s3.length} registros · cobertura ${coverage(data.s3).toFixed(1)}%</small></article>
-  <article class="card full"><h3>Cobertura de evidencias global</h3><div class="metric">${globalCoverage.toFixed(1)}%</div></article>`;
-}
-
-function renderScope1(editId = "") {
-  const el = panel("scope1");
-  const editing = state.scope1.find((r) => r.id === editId);
-  const gwpFactors = state.factores.filter((f) => f.unidad === "GWP");
-  const fuelFactor = state.factores.find((f) => f.id === "FE-S1-MEZCLA2T") || { valor: 2.31 };
-  const rows = state.scope1.map((r) => `<tr><td>${r.id}</td><td>${r.fecha}</td><td>${r.fuente}</td><td>${r.actividad}</td><td>${Number(r.cantidad).toFixed(2)} ${r.unidad}</td><td>${Number(r.factor_emision).toFixed(3)}</td><td>${(calcScope1Emission(r) * 1000).toFixed(2)}</td><td>${calcScope1Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(", ")}</td><td class="actions"><button data-edit-s1="${r.id}">Editar</button><button class="danger" data-del-s1="${r.id}">Eliminar</button></td></tr>`).join("");
-
-  el.innerHTML = `<article class="card full"><h3>Emisiones directas (Scope 1)</h3><button id="new-s1" class="secondary">+ Nuevo registro</button>
-  <form id="form-s1" class="grid-form">
-  <input type="hidden" name="id" value="${editing?.id || ""}" />
-  <label>Fecha <input type="date" name="fecha" value="${editing?.fecha || ""}" required /></label>
-  <label>Fuente <select name="fuente" id="s1-source"><option value="Refrigerante (A/A)">Refrigerante (A/A)</option><option value="Combustible podadora 2T">Combustible podadora 2T</option></select></label>
-  <label class="span-2">Descripción / actividad <input name="actividad" value="${editing?.actividad || ""}" required /></label>
-  <label id="lbl-cantidad">Cantidad <input type="number" min="0" step="0.01" name="cantidad" value="${editing?.cantidad || ""}" required /></label>
-  <label id="lbl-unidad">Unidad <input name="unidad" value="${editing?.unidad || "kg"}" required /></label>
-  <label id="lbl-refri">Tipo refrigerante <select name="tipo_refrigerante" id="tipo-refri"><option value="">N/A</option>${gwpFactors.map((f) => `<option value="${f.id}">${f.nombre} (${f.valor})</option>`).join("")}<option value="custom">Otro (manual)</option></select></label>
-  <label id="lbl-factor">Factor/GWP <input type="number" min="0" step="0.001" name="factor_emision" value="${editing?.factor_emision || ""}" required /></label>
-  <label>Horas (opcional) <input type="number" min="0" step="0.01" name="horas" value="${editing?.horas || ""}" /></label>
-  <label>Consumo L/h (opcional) <input type="number" min="0" step="0.01" name="consumo_lh" value="${editing?.consumo_lh || ""}" /></label>
-  <label class="span-2">Evidencias vinculadas ${evidenceSelectorHtml(editing?.evidenciaIds || [])}</label>
-  <button type="submit">Guardar Scope 1</button>
-  </form></article>
-  <article class="card full"><table><thead><tr><th>ID</th><th>Fecha</th><th>Fuente</th><th>Actividad</th><th>Cantidad</th><th>Factor</th><th>kgCO2e</th><th>tCO2e</th><th>Evidencias</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table></article>`;
-
-  const sourceSel = el.querySelector("#s1-source");
-  const refriSel = el.querySelector("#tipo-refri");
-  sourceSel.value = editing?.fuente || "Refrigerante (A/A)";
-  refriSel.value = editing?.tipo_refrigerante || "";
-
-  function syncScope1Fields() {
-    const isRef = sourceSel.value === "Refrigerante (A/A)";
-    el.querySelector("#lbl-refri").style.display = isRef ? "grid" : "none";
-    el.querySelector("#lbl-cantidad input").placeholder = isRef ? "kg" : "litros";
-    el.querySelector("#lbl-unidad input").value = isRef ? "kg" : "litros";
-    if (isRef && refriSel.value && refriSel.value !== "custom") {
-      el.querySelector('[name="factor_emision"]').value = factorById(refriSel.value)?.valor || "";
-    }
-    if (!isRef && !editing?.id) el.querySelector('[name="factor_emision"]').value = fuelFactor.valor;
-  }
-  sourceSel.onchange = syncScope1Fields;
-  refriSel.onchange = syncScope1Fields;
-  syncScope1Fields();
-
-  document.getElementById("new-s1").onclick = () => renderScope1();
-  el.querySelectorAll("[data-edit-s1]").forEach((b) => (b.onclick = () => renderScope1(b.dataset.editS1)));
-  el.querySelectorAll("[data-del-s1]").forEach((b) => (b.onclick = () => { state.scope1 = state.scope1.filter((r) => r.id !== b.dataset.delS1); pushLog(`Eliminado ${b.dataset.delS1}`); renderAll(); }));
-
-  document.getElementById("form-s1").onsubmit = (e) => {
-    e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target).entries());
-    const evidenceIds = [...e.target.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
-    const payload = {
-      id: data.id || `S1-${String(state.nextIds.scope1++).padStart(3, "0")}`,
-      fecha: data.fecha,
-      fuente: data.fuente,
-      actividad: data.actividad,
-      cantidad: Number(data.cantidad || (Number(data.horas || 0) * Number(data.consumo_lh || 0))),
-      unidad: data.unidad,
-      tipo_refrigerante: data.tipo_refrigerante,
-      factor_emision: Number(data.factor_emision),
-      horas: Number(data.horas || 0),
-      consumo_lh: Number(data.consumo_lh || 0),
-      evidenciaIds,
-      updatedAt: new Date().toISOString()
-    };
-    const idx = state.scope1.findIndex((r) => r.id === payload.id);
-    if (idx >= 0) state.scope1[idx] = payload; else state.scope1.push(payload);
-    pushLog(`Guardado ${payload.id}`);
-    renderAll();
-    renderScope1();
-  };
-}
-
-function renderScope2(editId = "") {
-  const el = panel("scope2");
-  const editing = state.scope2.find((r) => r.id === editId);
-  const rows = state.scope2.map((r) => `<tr><td>${r.id}</td><td>${r.fecha}</td><td>${r.kwh}</td><td>${r.factor_id}</td><td>${calcScope2Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(",")}</td><td class="actions"><button data-edit-s2="${r.id}">Editar</button><button class="danger" data-del-s2="${r.id}">Eliminar</button></td></tr>`).join("");
-  el.innerHTML = `<article class="card full"><h3>Scope 2 · Electricidad</h3><button id="new-s2" class="secondary">+ Nuevo</button>
-  <form id="form-s2" class="grid-form"><input type="hidden" name="id" value="${editing?.id || ""}" />
-  <label>Fecha (mes) <input type="month" name="fecha" value="${editing?.fecha || ""}" required /></label>
-  <label>kWh <input type="number" min="0" step="0.01" name="kwh" value="${editing?.kwh || ""}" required /></label>
-  <label>Factor <select name="factor_id">${state.factores.filter((f) => f.alcance === "scope2").map((f) => `<option value="${f.id}" ${editing?.factor_id === f.id ? "selected" : ""}>${f.nombre}</option>`).join("")}</select></label>
-  <label class="span-2">Evidencias ${evidenceSelectorHtml(editing?.evidenciaIds || [])}</label>
-  <button type="submit">Guardar</button></form></article>
-  <article class="card full"><table><thead><tr><th>ID</th><th>Fecha</th><th>kWh</th><th>Factor</th><th>tCO2e</th><th>Evidencias</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table></article>`;
-
-  document.getElementById("new-s2").onclick = () => renderScope2();
-  el.querySelectorAll("[data-edit-s2]").forEach((b) => (b.onclick = () => renderScope2(b.dataset.editS2)));
-  el.querySelectorAll("[data-del-s2]").forEach((b) => (b.onclick = () => { state.scope2 = state.scope2.filter((r) => r.id !== b.dataset.delS2); renderAll(); }));
-  document.getElementById("form-s2").onsubmit = (e) => {
-    e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target).entries());
-    const payload = { ...data, id: data.id || `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, kwh: Number(data.kwh), evidenciaIds: [...e.target.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value) };
-    const idx = state.scope2.findIndex((r) => r.id === payload.id);
-    if (idx >= 0) state.scope2[idx] = payload; else state.scope2.push(payload);
-    pushLog(`Guardado ${payload.id}`);
-    renderAll();
-    renderScope2();
-  };
-}
-
-function renderScope3(editId = "") {
-  const el = panel("scope3");
-  const editing = state.scope3.find((r) => r.id === editId);
-  const rows = state.scope3.map((r) => `<tr><td>${r.id}</td><td>${r.fecha}</td><td>${r.actividad}</td><td>${r.litros}</td><td>${r.factor_id}</td><td>${calcScope3Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(",")}</td><td class="actions"><button data-edit-s3="${r.id}">Editar</button><button class="danger" data-del-s3="${r.id}">Eliminar</button></td></tr>`).join("");
-  el.innerHTML = `<article class="card full"><h3>Scope 3 · Operaciones indirectas</h3><button id="new-s3" class="secondary">+ Nuevo</button>
-  <form id="form-s3" class="grid-form"><input type="hidden" name="id" value="${editing?.id || ""}" />
-  <label>Fecha <input type="date" name="fecha" value="${editing?.fecha || ""}" required /></label>
-  <label>Actividad <input name="actividad" value="${editing?.actividad || ""}" required /></label>
-  <label>Litros combustible <input type="number" min="0" step="0.01" name="litros" value="${editing?.litros || ""}" required /></label>
-  <label>Factor <select name="factor_id">${state.factores.filter((f) => f.alcance === "scope3").map((f) => `<option value="${f.id}" ${editing?.factor_id === f.id ? "selected" : ""}>${f.nombre}</option>`).join("")}</select></label>
-  <label class="span-2">Evidencias ${evidenceSelectorHtml(editing?.evidenciaIds || [])}</label>
-  <button type="submit">Guardar</button></form></article>
-  <article class="card full"><table><thead><tr><th>ID</th><th>Fecha</th><th>Actividad</th><th>Litros</th><th>Factor</th><th>tCO2e</th><th>Evidencias</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table></article>`;
-  document.getElementById("new-s3").onclick = () => renderScope3();
-  el.querySelectorAll("[data-edit-s3]").forEach((b) => (b.onclick = () => renderScope3(b.dataset.editS3)));
-  el.querySelectorAll("[data-del-s3]").forEach((b) => (b.onclick = () => { state.scope3 = state.scope3.filter((r) => r.id !== b.dataset.delS3); renderAll(); }));
-  document.getElementById("form-s3").onsubmit = (e) => {
-    e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target).entries());
-    const payload = { ...data, id: data.id || `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, litros: Number(data.litros), evidenciaIds: [...e.target.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value) };
-    const idx = state.scope3.findIndex((r) => r.id === payload.id);
-    if (idx >= 0) state.scope3[idx] = payload; else state.scope3.push(payload);
-    pushLog(`Guardado ${payload.id}`);
-    renderAll();
-    renderScope3();
-  };
-}
-
-function renderFactores() {
-  const el = panel("factores");
-  const rows = state.factores.map((f) => `<tr><td>${f.id}</td><td>${f.alcance}</td><td>${f.nombre}</td><td><input data-factor="${f.id}" type="number" step="0.001" value="${f.valor}" /></td><td>${f.unidad}</td></tr>`).join("");
-  el.innerHTML = `<article class="card full"><h3>Factores de emisión y GWP</h3>
-  <p>Versión de factores: <b>${state.meta.factorsVersion}</b> · Última edición: <b>${new Date(state.meta.factorsUpdatedAt).toLocaleString()}</b></p>
-  <table><thead><tr><th>ID</th><th>Scope</th><th>Nombre</th><th>Valor</th><th>Unidad</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="btn-row"><button id="save-factors">Guardar factores</button><input id="factor-version" value="${state.meta.factorsVersion}" placeholder="Versión"/></div></article>`;
-  document.getElementById("save-factors").onclick = () => {
-    document.querySelectorAll("[data-factor]").forEach((input) => {
-      const factor = factorById(input.dataset.factor);
-      factor.valor = Number(input.value);
-    });
-    state.meta.factorsVersion = document.getElementById("factor-version").value || state.meta.factorsVersion;
-    state.meta.factorsUpdatedAt = new Date().toISOString();
-    pushLog("Factores actualizados");
-    renderAll();
-    showToast("Factores guardados");
-  };
-}
-
-async function hashFile(file) {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  return [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function linkedRecordsByEvidenceId(id) {
-  const uses = [];
-  state.scope1.forEach((r) => (r.evidenciaIds || []).includes(id) && uses.push(`Scope 1 · ${r.id}`));
-  state.scope2.forEach((r) => (r.evidenciaIds || []).includes(id) && uses.push(`Scope 2 · ${r.id}`));
-  state.scope3.forEach((r) => (r.evidenciaIds || []).includes(id) && uses.push(`Scope 3 · ${r.id}`));
-  return uses;
-}
-
-function renderEvidencias() {
-  const el = panel("evidencias");
-  const rows = state.evidencias.map((ev) => `<tr><td>${ev.id}</td><td>${ev.tipo}</td><td>${ev.archivo_nombre}</td><td>${ev.hash?.slice(0, 18)}...</td><td>${ev.fecha_documento || ""}</td><td>${linkedRecordsByEvidenceId(ev.id).join("; ") || "Sin uso"}</td><td class="actions"><button data-del-ev="${ev.id}" class="danger">Eliminar</button></td></tr>`).join("");
-  el.innerHTML = `<article class="card full"><h3>Evidencias y trazabilidad</h3>
-  <form id="form-ev" class="grid-form">
-  <label>Tipo <input name="tipo" required /></label>
-  <label>Fecha documento <input type="date" name="fecha_documento"/></label>
-  <label class="span-2">Nota <input name="nota" /></label>
-  <label class="span-2">Archivo <input type="file" id="ev-file" required /></label>
-  <button type="submit">Guardar evidencia</button>
-  </form></article>
-  <article class="card full"><table><thead><tr><th>ID</th><th>Tipo</th><th>Archivo</th><th>Hash</th><th>Fecha doc.</th><th>Dónde se usa</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table></article>`;
-  document.getElementById("form-ev").onsubmit = async (e) => {
-    e.preventDefault();
-    const file = document.getElementById("ev-file").files[0];
-    if (!file) return;
-    const data = Object.fromEntries(new FormData(e.target).entries());
-    const id = `EVD-${String(state.nextIds.evidencia++).padStart(3, "0")}`;
-    state.evidencias.push({ id, tipo: data.tipo, archivo_nombre: file.name, hash: await hashFile(file), fecha_documento: data.fecha_documento, nota: data.nota });
-    pushLog(`Evidencia ${id} creada`);
-    renderAll();
-    showToast("Evidencia guardada");
-  };
-  el.querySelectorAll("[data-del-ev]").forEach((btn) => {
-    btn.onclick = () => {
-      const id = btn.dataset.delEv;
-      state.evidencias = state.evidencias.filter((ev) => ev.id !== id);
-      [state.scope1, state.scope2, state.scope3].forEach((scope) => scope.forEach((r) => { r.evidenciaIds = (r.evidenciaIds || []).filter((evId) => evId !== id); }));
-      pushLog(`Evidencia ${id} eliminada`);
-      renderAll();
-    };
-  });
-}
-
-function normalizeRecordDate(dateVal) {
-  if (!dateVal) return "";
-  return /^\d{4}-\d{2}$/.test(dateVal) ? `${dateVal}-01` : dateVal;
-}
-
-function hasActivePeriod(fromDate, toDate) {
-  return Boolean(fromDate || toDate);
-}
-
-function filterByPeriod(records, fromDate, toDate) {
-  const filtered = [];
-  let excludedNoDate = 0;
-  const periodActive = hasActivePeriod(fromDate, toDate);
-
-  records.forEach((record) => {
-    const normalizedDate = normalizeRecordDate(record.fecha);
-    if (!normalizedDate) {
-      if (periodActive) excludedNoDate += 1;
-      else filtered.push(record);
-      return;
-    }
-    if (fromDate && normalizedDate < fromDate) return;
-    if (toDate && normalizedDate > toDate) return;
-    filtered.push(record);
-  });
-
-  return { records: filtered, excludedNoDate };
-}
-
-function getActiveReportFilter() {
-  const configured = state.reportFilter || {};
-  const enabled = Boolean(configured.enabled || configured.from || configured.to);
-  return {
-    from: configured.from || "",
-    to: configured.to || "",
-    onlyWithEvidence: Boolean(configured.onlyWithEvidence),
-    includeTrace: configured.includeTrace !== false,
-    enabled
-  };
-}
-
-function reportRecords(fromDate = "", toDate = "", onlyWithEvidence = false) {
-  const s1Period = filterByPeriod(state.scope1, fromDate, toDate);
-  const s2Period = filterByPeriod(state.scope2, fromDate, toDate);
-  const s3Period = filterByPeriod(state.scope3, fromDate, toDate);
-
-  const byEvidence = (rows) => rows.filter((r) => !onlyWithEvidence || (r.evidenciaIds || []).length > 0);
-  return {
-    s1: byEvidence(s1Period.records),
-    s2: byEvidence(s2Period.records),
-    s3: byEvidence(s3Period.records),
-    excludedNoDate: s1Period.excludedNoDate + s2Period.excludedNoDate + s3Period.excludedNoDate
-  };
-}
-
-function scopeSectionHtml(title, records, columns, subtotal) {
-  if (!records.length) {
-    return `<section class="report-section report-scope-break"><h2>${title}</h2><p class="empty-note">Sin registros en el período.</p><p><b>Subtotal:</b> ${subtotal.toFixed(4)} tCO2e</p></section>`;
-  }
-
-  return `<section class="report-section report-scope-break"><h2>${title}</h2>
-  <table class="report-table"><thead><tr>${columns.map((col) => `<th>${col}</th>`).join("")}</tr></thead>
-  <tbody>${records.join("")}</tbody></table><p><b>Subtotal:</b> ${subtotal.toFixed(4)} tCO2e</p></section>`;
-}
-
-function buildReportHtml(fromDate, toDate, onlyWithEvidence, includeTrace) {
-  const data = reportRecords(fromDate, toDate, onlyWithEvidence);
-  const t1 = data.s1.reduce((a, r) => a + calcScope1Emission(r), 0);
-  const t2 = data.s2.reduce((a, r) => a + calcScope2Emission(r), 0);
-  const t3 = data.s3.reduce((a, r) => a + calcScope3Emission(r), 0);
-  const total = t1 + t2 + t3;
-  const now = new Date();
-  const periodLabel = hasActivePeriod(fromDate, toDate) ? `${fromDate || "inicio"} a ${toDate || "actual"}` : "Todo";
-
-  const factorRows = state.factores.map((f) => `<tr><td>${f.id}</td><td>${f.alcance}</td><td>${f.nombre}</td><td>${f.valor}</td><td>${f.unidad}</td></tr>`).join("");
-  const traza = state.evidencias.map((ev) => `<tr><td>${ev.id}</td><td>${ev.tipo}</td><td>${ev.archivo_nombre}</td><td>${ev.hash || ""}</td><td>${ev.fecha_documento || ""}</td><td>${linkedRecordsByEvidenceId(ev.id).join("; ") || "Sin vínculo"}</td></tr>`).join("");
-
-  const baseStyles = `
-  :root { --bg:#f4efe4; --bg-alt:#eae1d1; --surface:#efe6d8; --surface-strong:#e2d6c3; --text:#1f1f1c; --text-muted:#5b564c; --accent:#557a5a; --accent-strong:#416146; --accent-soft:#dce7d8; --border:#cdbfa9; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:Inter, Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--text); line-height:1.45; font-size:12px; }
-  h1,h2,h3 { color:var(--accent-strong); margin:.2rem 0 .45rem; }
-  .report-wrap { max-width:960px; margin:0 auto; padding:1.2rem; }
-  .report-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem; margin-bottom:.85rem; }
-  .report-meta { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:.4rem 1rem; color:var(--text-muted); }
-  .kpi-grid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.6rem; }
-  .kpi { background:var(--bg-alt); border:1px solid var(--border); border-radius:10px; padding:.6rem; }
-  .kpi strong { font-size:1.15rem; color:var(--accent-strong); }
-  table { width:100%; border-collapse:collapse; background:var(--surface); }
-  th,td { border:1px solid var(--border); padding:.35rem .45rem; text-align:left; vertical-align:top; }
-  th { background:var(--surface-strong); }
-  tbody tr:nth-child(even) td { background:color-mix(in srgb, var(--surface) 88%, var(--bg) 12%); }
-  .report-table { margin-top:.45rem; }
-  .report-warning { color:#7c5a1e; font-weight:600; }
-  .empty-note { color:var(--text-muted); font-style:italic; }
-  .print-controls { display:flex; gap:.55rem; margin-bottom:1rem; }
-  .print-controls button { border:1px solid var(--border); border-radius:8px; padding:.45rem .75rem; background:var(--accent); color:#fff; cursor:pointer; }
-  .report-header { position:sticky; top:0; background:var(--bg); padding:.35rem 0 .55rem; margin-bottom:.65rem; }
-  @media print {
-    @page { size:A4 portrait; margin:13mm; }
-    body { font-size:11px; background:#fff; }
-    .no-print { display:none !important; }
-    .report-wrap { max-width:none; padding:0; }
-    .report-header { position:fixed; top:0; left:0; right:0; background:#fff; border-bottom:1px solid var(--border); padding:3mm 0; }
-    .report-page-content { margin-top:18mm; }
-    .report-scope-break { page-break-before:always; }
-    table { page-break-inside:auto; }
-    tr { page-break-inside:avoid; page-break-after:auto; }
-  }
-  `;
-
-  const scope1Rows = data.s1.map((r) => `<tr><td>${r.id}</td><td>${r.fecha || "-"}</td><td>${r.fuente}</td><td>${r.actividad}</td><td>${r.cantidad} ${r.unidad}</td><td>${Number(r.factor_emision).toFixed(3)}</td><td>${calcScope1Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(", ") || "-"}</td></tr>`);
-  const scope2Rows = data.s2.map((r) => `<tr><td>${r.id}</td><td>${r.fecha || "-"}</td><td>${r.kwh}</td><td>${factorById(r.factor_id)?.nombre || r.factor_id}</td><td>${calcScope2Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(", ") || "-"}</td></tr>`);
-  const scope3Rows = data.s3.map((r) => `<tr><td>${r.id}</td><td>${r.fecha || "-"}</td><td>${r.actividad}</td><td>${r.litros} L</td><td>${factorById(r.factor_id)?.nombre || r.factor_id}</td><td>${calcScope3Emission(r).toFixed(4)}</td><td>${(r.evidenciaIds || []).join(", ") || "-"}</td></tr>`);
-
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"/><title>Reporte GEI</title><style>${baseStyles}</style></head><body>
-  <div class="report-wrap">
-    <div class="print-controls no-print"><button onclick="window.print()">Descargar PDF</button><button onclick="window.close()">Cerrar</button></div>
-    <header class="report-header"><strong>ElectroGreem GHG App</strong> · Inventario GEI Scope 1/2/3 · Período ${periodLabel}</header>
-    <div class="report-page-content">
-      <section class="report-card">
-        <h1>ElectroGreem GHG App — Inventario de GEI (Scope 1/2/3)</h1>
-        <p><b>Autor:</b> Héctor Miguel Fadel | PPS Ing. Electrónica (UTN-FRT) | <b>Tutor:</b> Prof. Ing. Ramón Oris</p>
-        <div class="report-meta">
-          <div><b>Versión:</b> ${APP_VERSION}</div><div><b>Fecha/hora:</b> ${now.toLocaleString()}</div>
-          <div><b>Período:</b> ${periodLabel}</div><div><b>Modo:</b> ${onlyWithEvidence ? "con evidencias" : "sin filtro de evidencias"}</div>
-        </div>
-        ${data.excludedNoDate ? `<p class="report-warning">${data.excludedNoDate} registros sin fecha excluidos por período activo.</p>` : ""}
-      </section>
-
-      <section class="report-card report-section">
-        <h2>Resumen ejecutivo</h2>
-        <div class="kpi-grid">
-          <div class="kpi"><div>Scope 1</div><strong>${t1.toFixed(4)}</strong><div>tCO2e</div></div>
-          <div class="kpi"><div>Scope 2</div><strong>${t2.toFixed(4)}</strong><div>tCO2e</div></div>
-          <div class="kpi"><div>Scope 3</div><strong>${t3.toFixed(4)}</strong><div>tCO2e</div></div>
-          <div class="kpi"><div>Total</div><strong>${total.toFixed(4)}</strong><div>tCO2e</div></div>
-        </div>
-        <p>Cobertura de evidencias: ${coverage([...data.s1, ...data.s2, ...data.s3]).toFixed(1)}%</p>
-      </section>
-
-      ${scopeSectionHtml("Alcance 1 (Scope 1)", scope1Rows, ["ID", "Fecha", "Actividad", "Descripción", "Entrada", "Factor", "Resultado (tCO2e)", "Evidencias"], t1)}
-      ${scopeSectionHtml("Alcance 2 (Scope 2)", scope2Rows, ["ID", "Fecha", "Entrada (kWh)", "Factor", "Resultado (tCO2e)", "Evidencias"], t2)}
-      ${scopeSectionHtml("Alcance 3 (Scope 3)", scope3Rows, ["ID", "Fecha", "Actividad", "Entrada", "Factor", "Resultado (tCO2e)", "Evidencias"], t3)}
-
-      <section class="report-card report-section report-scope-break">
-        <h2>Total</h2>
-        <table class="report-table"><thead><tr><th>Concepto</th><th>tCO2e</th></tr></thead><tbody>
-          <tr><td>Scope 1</td><td>${t1.toFixed(4)}</td></tr>
-          <tr><td>Scope 2</td><td>${t2.toFixed(4)}</td></tr>
-          <tr><td>Scope 3</td><td>${t3.toFixed(4)}</td></tr>
-          <tr><td><b>Total</b></td><td><b>${total.toFixed(4)}</b></td></tr>
-        </tbody></table>
-      </section>
-
-      <section class="report-card report-section">
-        <h2>Anexos</h2>
-        <h3>Factores utilizados</h3>
-        <table class="report-table"><thead><tr><th>ID</th><th>Scope</th><th>Nombre</th><th>Valor</th><th>Unidad</th></tr></thead><tbody>${factorRows}</tbody></table>
-        ${includeTrace ? `<h3>Trazabilidad</h3><table class="report-table"><thead><tr><th>ID</th><th>Tipo</th><th>Nombre</th><th>Hash</th><th>Fecha</th><th>Vinculación</th></tr></thead><tbody>${traza || '<tr><td colspan="6">Sin evidencias cargadas.</td></tr>'}</tbody></table>` : ""}
-        <h3>Registro de cambios</h3>
-        <table class="report-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Autor</th></tr></thead><tbody>${state.changelog.map((c) => `<tr><td>${new Date(c.at).toLocaleString()}</td><td>${c.action}</td><td>${c.author}</td></tr>`).join("")}</tbody></table>
-      </section>
-
-      <section class="report-card report-section">
-        <h2>Supuestos y metodología</h2>
-        <p>Se consideran únicamente registros operativos cargados en la aplicación y factores vigentes declarados por el usuario.</p>
-        <ul>
-          <li>Scope 1 refrigerante: tCO2e = (kg × GWP) / 1000.</li>
-          <li>Scope 1 combustible: tCO2e = (L × EF kgCO2e/L) / 1000.</li>
-          <li>Scope 2: tCO2e = (kWh / 1000) × FE (tCO2e/MWh).</li>
-          <li>Scope 3: tCO2e = (L × EF kgCO2e/L) / 1000.</li>
-        </ul>
-        <p><b>Créditos:</b> Autor Héctor Miguel Fadel · Tutor Prof. Ing. Ramón Oris.</p>
-      </section>
-    </div>
-  </div>
-  </body></html>`;
-}
-
-function renderReportes() {
-  const el = panel("reportes");
-  const filter = getActiveReportFilter();
-  const data = reportRecords(filter.from, filter.to, filter.onlyWithEvidence);
-  const t1 = data.s1.reduce((acc, r) => acc + calcScope1Emission(r), 0);
-  const t2 = data.s2.reduce((acc, r) => acc + calcScope2Emission(r), 0);
-  const t3 = data.s3.reduce((acc, r) => acc + calcScope3Emission(r), 0);
-  const periodLabel = filter.enabled ? `${filter.from || "inicio"} a ${filter.to || "actual"}` : "Todo";
-
-  el.innerHTML = `<article class="card full"><h3>Informe profesional y PDF</h3>
-  <div class="grid-form report-filter-grid">
-    <label>Fecha desde <input type="date" id="rep-from" value="${filter.from}"/></label>
-    <label>Fecha hasta <input type="date" id="rep-to" value="${filter.to}"/></label>
-    <label><input type="checkbox" id="rep-only-ev" ${filter.onlyWithEvidence ? "checked" : ""}/> Solo registros con evidencias</label>
-    <label><input type="checkbox" id="rep-trace" ${filter.includeTrace ? "checked" : ""}/> Incluir anexos de trazabilidad</label>
-    <button type="button" id="apply-report-filter">Aplicar</button>
-    <button type="button" id="clear-report-filter" class="secondary">Limpiar período</button>
-    <button type="button" id="gen-report">Abrir reporte imprimible</button>
-  </div>
-  <div class="report-preview card-preview">
-    <p><b>Período activo:</b> ${periodLabel}</p>
-    <p><b>Resumen:</b> S1 ${t1.toFixed(4)} · S2 ${t2.toFixed(4)} · S3 ${t3.toFixed(4)} · Total ${(t1 + t2 + t3).toFixed(4)} tCO2e.</p>
-    ${data.excludedNoDate ? `<p class="report-warning">${data.excludedNoDate} registros sin fecha excluidos por período activo.</p>` : ""}
-  </div>
-  </article>`;
-
-  document.getElementById("apply-report-filter").onclick = () => {
-    const from = document.getElementById("rep-from").value;
-    const to = document.getElementById("rep-to").value;
-    state.reportFilter = {
-      ...state.reportFilter,
-      from,
-      to,
-      onlyWithEvidence: document.getElementById("rep-only-ev").checked,
-      includeTrace: document.getElementById("rep-trace").checked,
-      enabled: hasActivePeriod(from, to)
-    };
-    pushLog(`Filtro de reportes aplicado (${from || "inicio"} - ${to || "actual"})`);
-    renderAll();
-    showToast("Filtro de período aplicado");
-  };
-
-  document.getElementById("clear-report-filter").onclick = () => {
-    state.reportFilter = { from: "", to: "", onlyWithEvidence: false, includeTrace: true, enabled: false };
-    renderAll();
-    showToast("Filtro de período limpiado");
-  };
-
-  document.getElementById("gen-report").onclick = () => {
-    const current = getActiveReportFilter();
-    const html = buildReportHtml(current.from, current.to, current.onlyWithEvidence, current.includeTrace);
-    const w = window.open("", "_blank");
-    w.document.write(html);
-    w.document.close();
-  };
-}
-
-function renderConfig() {
-  const el = panel("config");
-  el.innerHTML = `<article class="card full"><h3>Pruebas y utilidades</h3>
-  <ul>
-    <li>☐ Crear/editar/borrar registro Scope 1 (refrigerante y combustible podadora 2T).</li>
-    <li>☐ Vincular evidencias a Scope 1/2/3.</li>
-    <li>☐ Verificar totales y cobertura en dashboard.</li>
-    <li>☐ Generar informe con y sin anexos de trazabilidad.</li>
-    <li>☐ Exportar e importar JSON correctamente.</li>
-  </ul>
-  <div class="btn-row"><button id="export-json">Exportar JSON</button><input id="import-json-file" type="file" accept="application/json"/><button id="import-json">Importar JSON</button></div>
-  </article>`;
-
-  document.getElementById("export-json").onclick = () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${BRAND.toLowerCase()}-backup.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
-  document.getElementById("import-json").onclick = async () => {
-    const file = document.getElementById("import-json-file").files[0];
-    if (!file) return showToast("Seleccioná un archivo JSON", "error");
-    const text = await file.text();
-    state = JSON.parse(text);
-    pushLog("Importación JSON");
-    renderAll();
-  };
 }

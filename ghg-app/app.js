@@ -716,53 +716,159 @@ function exportCsv(periodOnly) {
 }
 function downloadBlob(content, type, filename) { const blob = new Blob([content], { type }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); URL.revokeObjectURL(a.href); }
 
-function pdfAlcanceTable(doc, y, title, records, mapper) {
-  doc.setFontSize(14); doc.text(title, 14, y); y += 6;
-  if (!records.length || records.every((r) => mapper(r)[4] === "Dato faltante")) { doc.setFillColor(250, 237, 223); doc.rect(14, y, 182, 15, "F"); doc.setFontSize(10); doc.text("Sin datos para el período seleccionado.", 16, y + 8, { maxWidth: 178 }); return y + 20; }
-  doc.autoTable({ startY: y, theme: "grid", styles: { font: "helvetica", fontSize: 9, lineColor: [216, 203, 184], lineWidth: 0.1 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Fecha", "Fuente/Actividad", "Entrada", "Factor", "tCO2e", "Evidencias"]], body: records.map(mapper) });
-  return doc.lastAutoTable.finalY + 8;
+function pdfEvidenceCell(record) {
+  const ids = record.evidenciaIds || [];
+  const linkedEvidence = ids.map((id) => state.evidencias.find((e) => e.id === id)).find(Boolean);
+  const linkedUrl = linkedEvidence?.url_view || linkedEvidence?.url || linkedEvidence?.url_download || "";
+  const url = (record.evidenceUrl || linkedUrl || "").trim();
+  if (url) return { text: "Abrir evidencia", url };
+  if (ids.length) return { text: ids[0], url: "" };
+  return { text: "-", url: "" };
+}
+
+function pdfAlcanceTable(doc, title, records, mapper, emissionFn) {
+  const sectionTop = 24;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(title, 14, sectionTop);
+
+  if (!records.length || records.every((r) => !hasEmission(r, emissionFn))) {
+    doc.setFillColor(250, 237, 223);
+    doc.roundedRect(14, sectionTop + 8, 182, 16, 2, 2, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("Sin registros en el período seleccionado para este alcance.", 18, sectionTop + 18, { maxWidth: 174 });
+    return;
+  }
+
+  const prepared = records.map((record) => {
+    const mapped = mapper(record);
+    const evidence = pdfEvidenceCell(record);
+    return {
+      row: [mapped[0], mapped[1], mapped[2], mapped[3], mapped[4], evidence.text],
+      evidenceUrl: evidence.url
+    };
+  });
+
+  doc.autoTable({
+    startY: sectionTop + 8,
+    theme: "grid",
+    styles: { font: "helvetica", fontSize: 9, lineColor: [216, 203, 184], lineWidth: 0.1, cellPadding: 2, overflow: "linebreak" },
+    headStyles: { fillColor: [234, 220, 198], textColor: 30, halign: "left" },
+    columnStyles: {
+      0: { cellWidth: 20, halign: "left" },
+      1: { cellWidth: 52, halign: "left" },
+      2: { cellWidth: 28, halign: "left" },
+      3: { cellWidth: 25, halign: "right" },
+      4: { cellWidth: 25, halign: "right" },
+      5: { cellWidth: 28, halign: "center" }
+    },
+    head: [["Fecha", "Fuente/Actividad", "Entrada", "Factor", "tCO2e", "Evidencia"]],
+    body: prepared.map((item) => item.row),
+    didDrawCell: (data) => {
+      if (data.section !== "body" || data.column.index !== 5) return;
+      const evidenceUrl = prepared[data.row.index]?.evidenceUrl;
+      if (!evidenceUrl) return;
+      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: evidenceUrl });
+    }
+  });
 }
 
 function generatePdf() {
-  const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const s1 = filterByPeriod(allAlcance1Records()), s2 = filterByPeriod(state.scope2), s3 = filterByPeriod(state.scope3);
-  const t1 = sumValidEmissions(s1, emissionS1), t2 = sumValidEmissions(s2, emissionS2), t3 = sumValidEmissions(s3, emissionS3);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const s1 = filterByPeriod(allAlcance1Records());
+  const s2 = filterByPeriod(state.scope2);
+  const s3 = filterByPeriod(state.scope3);
+  const t1 = sumValidEmissions(s1, emissionS1);
+  const t2 = sumValidEmissions(s2, emissionS2);
+  const t3 = sumValidEmissions(s3, emissionS3);
   const period = state.globalPeriod.from || state.globalPeriod.to ? `${state.globalPeriod.from || "inicio"} a ${state.globalPeriod.to || "actual"}` : "todo";
 
-  doc.setFillColor(244, 239, 230); doc.rect(0, 0, 210, 297, "F"); doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.text("ElectroGreem GHG App – Inventario de GEI (Alcance 1/2/3)", 14, 22);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text([`Autor: Héctor Miguel Fadel`, "Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT)", "Tutor/Supervisión: Prof. Ing. Ramón Oris", `Versión ${APP_VERSION} · Generado ${new Date().toLocaleString("es-AR")}`, `Período aplicado: ${period}`], 14, 34);
-  doc.setFont("helvetica", "bold"); doc.text("Resumen ejecutivo", 14, 62); doc.setFont("helvetica", "normal");
-  doc.autoTable({ startY: 66, theme: "grid", styles: { font: "helvetica", fontSize: 9 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Alcance", "tCO2e", "Cobertura evidencias"]], body: [["Alcance 1 (Directo)", t4(t1), `${coverage(s1).toFixed(1)}%`], ["Alcance 2 (Electricidad)", t4(t2), `${coverage(s2).toFixed(1)}%`], ["Alcance 3 (Indirecto: Transporte y otros)", t4(t3), `${coverage(s3).toFixed(1)}%`], ["Total", t4(t1 + t2 + t3), `${coverage([...s1, ...s2, ...s3]).toFixed(1)}%`]] });
-  doc.text("Supuestos y límites", 14, doc.lastAutoTable.finalY + 8); doc.setFontSize(9); doc.text(["• Depende de datos de actividad y factores cargados.", "• Límites organizacionales declarados por el usuario.", "• No incluye emisiones no registradas en la herramienta."], 14, doc.lastAutoTable.finalY + 14);
-  const metodologiaY = doc.lastAutoTable.finalY + 34;
-  doc.setFont("helvetica", "bold"); doc.text("Metodología y fuentes", 14, metodologiaY);
-  doc.setFont("helvetica", "normal");
-  doc.text("Para electricidad comprada se utiliza como referencia la serie oficial de la Secretaría de Energía para el factor de emisión de la red argentina. Para combustibles líquidos se utiliza la metodología oficial de la Secretaría de Energía para emisiones de CO2 asociadas a ventas al público de combustibles. Para refrigerantes se utilizan GWPs de referencia internacional ampliamente aceptados (EPA/GHG Protocol/IPCC), dejando trazabilidad explícita del valor elegido, el año y la fuente.", 14, metodologiaY + 6, { maxWidth: 180 });
-  let y = metodologiaY + 18;
+  doc.setFillColor(244, 239, 230);
+  doc.rect(0, 0, 210, 297, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(17);
+  doc.text("ElectroGreem GHG App – Inventario de GEI (Alcance 1/2/3)", 14, 22);
 
-  y = pdfAlcanceTable(doc, y, "Alcance 1 (Directo)", s1, (r) => [fmtDate(r.fecha), r.source || r.activity || "-", `${r.input ?? "-"} ${r.kind === "refrigerant" ? "kg" : (r.unit || "L")}`, `${r.factor ?? "-"}`, formatEmission(emissionS1(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
-  y = pdfAlcanceTable(doc, y, "Alcance 2 (Electricidad)", s2, (r) => [fmtDate(r.fecha), "Electricidad", `${r.kwh ?? "-"} kWh`, `${factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS2(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
-  if (y > 250) { doc.addPage(); y = 20; }
-  y = pdfAlcanceTable(doc, y, "Alcance 3 (Indirecto: Transporte y otros)", s3, (r) => [fmtDate(r.fecha), r.activity || "-", r.combustible_l !== null && r.combustible_l !== undefined ? `${r.combustible_l} L` : (r.tkm !== null && r.tkm !== undefined ? `${r.tkm} tkm` : "-"), `${(r.combustible_l !== null && r.combustible_l !== undefined ? r.fuelFactor : r.transportFactor) || factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS3(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
-
-  doc.setFont("helvetica", "bold"); doc.text("Factores utilizados y vigencia", 14, y);
   doc.setFont("helvetica", "normal");
-  doc.autoTable({ startY: y + 3, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Factor", "Valor", "Unidad", "Año", "Fuente", "Default (sí/no)"]], body: state.factores.map((f) => [f.nombre || f.id, String(f.valor), f.unidad || "-", String(f.anio_factor || "-"), f.fuente_nombre || "-", f.usar_por_defecto ? "Sí" : "No"]) });
+  doc.setFontSize(10);
+  doc.text([`Autor: Héctor Miguel Fadel`, "Práctica Profesional Supervisada (PPS) – Ingeniería Electrónica (UTN-FRT)", "Tutor/Supervisión: Prof. Ing. Ramón Oris", "Agradecimientos: Búho Producciones Artísticas", `Versión ${APP_VERSION} · Generado ${new Date().toLocaleString("es-AR")}`, `Período aplicado: ${period}`], 14, 34);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Resumen ejecutivo", 14, 74);
+  doc.setFont("helvetica", "normal");
+  doc.autoTable({ startY: 78, theme: "grid", styles: { font: "helvetica", fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Alcance", "tCO2e", "Cobertura evidencias"]], body: [["Alcance 1 (Directo)", t4(t1), `${coverage(s1).toFixed(1)}%`], ["Alcance 2 (Electricidad)", t4(t2), `${coverage(s2).toFixed(1)}%`], ["Alcance 3 (Indirecto: Transporte y otros)", t4(t3), `${coverage(s3).toFixed(1)}%`], ["Total", t4(t1 + t2 + t3), `${coverage([...s1, ...s2, ...s3]).toFixed(1)}%`]] });
+
+  let y = doc.lastAutoTable.finalY + 12;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Supuestos y límites", 14, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(["• Depende de datos de actividad y factores cargados.", "• Límites organizacionales declarados por el usuario.", "• No incluye emisiones no registradas en la herramienta."], 14, y + 7);
+
+  y += 26;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Metodología y fuentes", 14, y);
+  doc.setFont("helvetica", "normal");
+  doc.text("Para electricidad comprada se utiliza como referencia la serie oficial de la Secretaría de Energía para el factor de emisión de la red argentina. Para combustibles líquidos se utiliza la metodología oficial de la Secretaría de Energía para emisiones de CO2 asociadas a ventas al público de combustibles. Para refrigerantes se utilizan GWPs de referencia internacional ampliamente aceptados (EPA/GHG Protocol/IPCC), dejando trazabilidad explícita del valor elegido, el año y la fuente.", 14, y + 7, { maxWidth: 182, lineHeightFactor: 1.3 });
+
+  doc.addPage();
+  pdfAlcanceTable(doc, "Alcance 1 (Directo)", s1, (r) => [fmtDate(r.fecha), r.source || r.activity || "-", `${r.input ?? "-"} ${r.kind === "refrigerant" ? "kg" : (r.unit || "L")}`, `${r.factor ?? "-"}`, formatEmission(emissionS1(r))], emissionS1);
+
+  doc.addPage();
+  pdfAlcanceTable(doc, "Alcance 2 (Electricidad)", s2, (r) => [fmtDate(r.fecha), "Electricidad", `${r.kwh ?? "-"} kWh`, `${factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS2(r))], emissionS2);
+
+  doc.addPage();
+  pdfAlcanceTable(doc, "Alcance 3 (Indirecto: Transporte y otros)", s3, (r) => [fmtDate(r.fecha), r.activity || "-", r.combustible_l !== null && r.combustible_l !== undefined ? `${r.combustible_l} L` : (r.tkm !== null && r.tkm !== undefined ? `${r.tkm} tkm` : "-"), `${(r.combustible_l !== null && r.combustible_l !== undefined ? r.fuelFactor : r.transportFactor) || factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS3(r))], emissionS3);
+
+  doc.addPage();
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("Factores utilizados y vigencia", 14, 24);
+  doc.setFont("helvetica", "normal");
+  doc.autoTable({ startY: 30, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, styles: { fontSize: 9, cellPadding: 2, overflow: "linebreak" }, columnStyles: { 1: { halign: "right", cellWidth: 20 } }, head: [["Factor", "Valor", "Unidad", "Año", "Fuente", "Default (sí/no)"]], body: state.factores.map((f) => [f.nombre || f.id, String(f.valor), f.unidad || "-", String(f.anio_factor || "-"), f.fuente_nombre || "-", f.usar_por_defecto ? "Sí" : "No"]) });
+
   const recordsInPeriod = [...s1, ...s2, ...s3];
   const evidenciasPeriodo = state.evidencias.filter((e) => linkedRecordsByEvidenceId(e.id).some((id) => recordsInPeriod.some((r) => r.id === id)));
-  let sectionY = doc.lastAutoTable.finalY + 4;
+  let sectionY = doc.lastAutoTable.finalY + 8;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Evidencias del período", 14, sectionY);
+  doc.setFont("helvetica", "normal");
   if (!evidenciasPeriodo.length) {
+    doc.setFillColor(250, 237, 223);
+    doc.roundedRect(14, sectionY + 4, 182, 14, 2, 2, "F");
     doc.setFontSize(10);
-    doc.text(NO_DATA_MESSAGE, 14, sectionY + 6);
-    sectionY += 10;
+    doc.text("Sin evidencias vinculadas en el período seleccionado.", 18, sectionY + 13);
+    sectionY += 24;
   } else {
-    doc.autoTable({ startY: sectionY, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: evidenciasPeriodo.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", e.url_view ? `Abrir evidencia: ${e.url_view}` : "Sin enlace"]) });
-    sectionY = doc.lastAutoTable.finalY + 4;
+    doc.autoTable({ startY: sectionY + 4, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, styles: { fontSize: 8.5, cellPadding: 2, overflow: "linebreak" }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: evidenciasPeriodo.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", e.url_view ? "Abrir evidencia" : "Sin enlace"]), didDrawCell: (data) => {
+      if (data.section !== "body" || data.column.index !== 5) return;
+      const ev = evidenciasPeriodo[data.row.index];
+      const url = ev?.url_view || ev?.url || ev?.url_download || "";
+      if (!url) return;
+      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
+    } });
   }
-  doc.autoTable({ startY: sectionY, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Registro de cambios", "Acción", "Autor"]], body: state.changelog.slice(0, 20).map((c) => [new Date(c.at).toLocaleString("es-AR"), c.action, c.author]) });
+
+  doc.addPage();
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("Registro de cambios", 14, 24);
+  doc.autoTable({ startY: 30, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, styles: { fontSize: 9, cellPadding: 2, overflow: "linebreak" }, head: [["Registro de cambios", "Acción", "Autor"]], body: state.changelog.slice(0, 20).map((c) => [new Date(c.at).toLocaleString("es-AR"), c.action, c.author]) });
 
   const pages = doc.getNumberOfPages();
-  for (let i = 1; i <= pages; i += 1) { doc.setPage(i); doc.setFontSize(8); doc.text(`ElectroGreem · Informe GEI · v${APP_VERSION}`, 14, 8); doc.text(`Generado ${new Date().toLocaleString("es-AR")}`, 14, 292); doc.text(`Página ${i} de ${pages}`, 175, 292); }
+  for (let i = 1; i <= pages; i += 1) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.text(`ElectroGreem · Informe GEI · v${APP_VERSION}`, 14, 8);
+    doc.text(`Generado ${new Date().toLocaleString("es-AR")}`, 14, 292);
+    doc.text(`Página ${i} de ${pages}`, 175, 292);
+  }
   doc.save(`ElectroGreem_Informe_GEI_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 

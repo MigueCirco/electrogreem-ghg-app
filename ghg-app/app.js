@@ -1,4 +1,4 @@
-const STORAGE_KEY = "electrogreem-ghg-v13";
+const STORAGE_KEY = "electrogreem-ghg-v14";
 const APP_VERSION = "1.1.0";
 const BRAND = "ElectroGreem";
 const NO_DATA_MESSAGE = "Sin datos cargados en el período seleccionado";
@@ -28,13 +28,16 @@ function initialState() {
     meta: { appVersion: APP_VERSION, createdAt: now, factorsVersion: "v1", factorsUpdatedAt: now },
     nextIds: { s1r: 1, s1f: 1, scope2: 1, scope3: 1, evidencia: 1 },
     factores: [
-      { id: "FE-S2-AR", alcance: "scope2", nombre: "Electricidad red AR", valor: 0.32, unidad: "kgCO2e/kWh" },
-      { id: "FE-S3-DIESEL", alcance: "scope3", nombre: "Transporte diésel", valor: 2.68, unidad: "kgCO2e/L" },
-      { id: "FE-S3-TKM", alcance: "scope3", nombre: "Transporte por tkm", valor: 0.12, unidad: "kgCO2e/tkm" },
-      { id: "GWP-R410A", alcance: "scope1", nombre: "R-410A", valor: 2088, unidad: "GWP" },
-      { id: "GWP-R134a", alcance: "scope1", nombre: "R-134a", valor: 1430, unidad: "GWP" },
-      { id: "GWP-R32", alcance: "scope1", nombre: "R-32", valor: 675, unidad: "GWP" },
-      { id: "FE-S1-MEZCLA2T", alcance: "scope1", nombre: "Mezcla 2T", valor: 2.31, unidad: "kgCO2e/L" }
+      { id: "FE-AR-ELEC-2021", alcance: "scope2", nombre: "Factor red eléctrica Argentina 2021", valor: 0.299, unidad: "kgCO2e/kWh", anio_factor: 2021, usar_por_defecto: true, fuente_nombre: "Secretaría de Energía + serie nacional 2013-2021 (valor 2021 replicado en inventario Rosario/RAMCC)", fuente_url: "https://datos.gob.ar/dataset/energia-calculo-factor-emision-co2-red-argentina-energia-electrica | https://www.rosario.gob.ar/inicio/sites/default/files/2024-01/INVENTARIO%20DE%20EMISIONES%20DE%20GASES%20EFECTO%20INVERNADERO%202021-2022.pdf", nota: "Usar como default nacional auditable para Alcance 2" },
+      { id: "FE-AR-ELEC-2022", alcance: "scope2", nombre: "Factor red eléctrica Argentina 2022", valor: 0.280, unidad: "kgCO2e/kWh", anio_factor: 2022, usar_por_defecto: false, fuente_nombre: "RAMCC / Inventario Rosario 2021-2022", fuente_url: "https://www.rosario.gob.ar/inicio/sites/default/files/2024-01/INVENTARIO%20DE%20EMISIONES%20DE%20GASES%20EFECTO%20INVERNADERO%202021-2022.pdf", nota: "Útil como referencia más reciente pero no tan directa como la serie nacional oficial" },
+      { id: "FE-AR-NAFTA", alcance: "scope1", nombre: "Factor combustión nafta", valor: 2.38, unidad: "kgCO2e/L", anio_factor: 2018, usar_por_defecto: false, fuente_nombre: "Secretaría de Energía - metodología huella CO2 EESS", fuente_url: "https://www.energia.gob.ar/contenidos/archivos/Reorganizacion/informacion_del_mercado/mercado_hidrocarburos/mapas/metodologia_huella_CO2_eess.pdf", nota: "Equivale a 2.38 tCO2/m3" },
+      { id: "FE-AR-GASOIL", alcance: "scope1", nombre: "Factor combustión gasoil", valor: 2.61, unidad: "kgCO2e/L", anio_factor: 2018, usar_por_defecto: true, fuente_nombre: "Secretaría de Energía - metodología huella CO2 EESS", fuente_url: "https://www.energia.gob.ar/contenidos/archivos/Reorganizacion/informacion_del_mercado/mercado_hidrocarburos/mapas/metodologia_huella_CO2_eess.pdf", nota: "Equivale a 2.61 tCO2/m3" },
+      { id: "FE-AR-MEZCLA2T", alcance: "scope1", nombre: "Factor mezcla 2T (usar nafta como default)", valor: 2.38, unidad: "kgCO2e/L", anio_factor: 2018, usar_por_defecto: true, fuente_nombre: "Secretaría de Energía - metodología huella CO2 EESS", fuente_url: "https://www.energia.gob.ar/contenidos/archivos/Reorganizacion/informacion_del_mercado/mercado_hidrocarburos/mapas/metodologia_huella_CO2_eess.pdf", nota: "Default práctico; el aceite 2T no se suma aparte salvo medición específica" },
+      { id: "GWP-R410A", alcance: "scope1", nombre: "GWP refrigerante R-410A", valor: 2088, unidad: "kgCO2e/kg", anio_factor: 2007, usar_por_defecto: true, fuente_nombre: "EPA GWP reference / EPA HVAC fact sheet", fuente_url: "https://www.epa.gov/climate-hfcs-reduction/technology-transitions-gwp-reference-table | https://www.epa.gov/sites/default/files/2015-07/documents/epa_hfc_uac_0.pdf", nota: "Default recomendado para splits típicos" },
+      { id: "GWP-R32", alcance: "scope1", nombre: "GWP refrigerante R-32", valor: 675, unidad: "kgCO2e/kg", anio_factor: 2007, usar_por_defecto: false, fuente_nombre: "EPA GWP reference / EPA HVAC fact sheet", fuente_url: "https://www.epa.gov/climate-hfcs-reduction/technology-transitions-gwp-reference-table | https://www.epa.gov/sites/default/files/2015-07/documents/epa_hfc_uac_0.pdf", nota: "Alternativa más nueva y de menor GWP" },
+      { id: "GWP-R134A", alcance: "scope1", nombre: "GWP refrigerante R-134a", valor: 1430, unidad: "kgCO2e/kg", anio_factor: 2007, usar_por_defecto: false, fuente_nombre: "EPA GWP reference", fuente_url: "https://www.epa.gov/climate-hfcs-reduction/technology-transitions-gwp-reference-table", nota: "Útil si aparece en equipos o automotor/refrigeración" },
+      { id: "GWP-R22", alcance: "scope1", nombre: "GWP refrigerante R-22", valor: 1810, unidad: "kgCO2e/kg", anio_factor: 2007, usar_por_defecto: false, fuente_nombre: "EPA HVAC fact sheet / CARB", fuente_url: "https://www.epa.gov/sites/default/files/2015-07/documents/epa_hfc_uac_0.pdf | https://ww2.arb.ca.gov/resources/documents/high-gwp-refrigerants", nota: "Usar solo si el técnico confirma ese gas" },
+      { id: "FE-S3-TKM", alcance: "scope3", nombre: "Transporte por tkm", valor: 0.12, unidad: "kgCO2e/tkm", anio_factor: 2020, usar_por_defecto: false, fuente_nombre: "Factor interno de referencia", fuente_url: "", nota: "Factor opcional para cálculo por tkm" }
     ],
     scope1: { refrigerants: [], fuels: [] },
     scope2: [],
@@ -172,7 +175,7 @@ function addHistoricElectricityDataset() {
       dataQuality: "Estimado",
       assumptions: HISTORIC_ELECTRICITY_ASSUMPTIONS,
       evidenceId: FACTURA_EVIDENCE_ID,
-      factor_id: "FE-S2-AR",
+      factor_id: "FE-AR-ELEC-2021",
       evidenciaIds: [FACTURA_EVIDENCE_ID],
       updatedAt: new Date().toISOString()
     });
@@ -182,7 +185,13 @@ function addHistoricElectricityDataset() {
 
 function pushLog(action) { state.changelog.unshift({ at: new Date().toISOString(), action, author: "Héctor Miguel Fadel" }); state.changelog = state.changelog.slice(0, 60); }
 function panel(name) { return document.querySelector(`.tab-panel[data-tab="${name}"]`); }
-function factorById(id) { return state.factores.find((f) => f.id === id); }
+function factorById(id) {
+  if (id === "FE-S2-AR") return state.factores.find((f) => f.id === "FE-AR-ELEC-2021");
+  if (id === "FE-AR-MEZCLA2T") return state.factores.find((f) => f.id === "FE-AR-MEZCLA2T");
+  if (id === "FE-S3-DIESEL") return state.factores.find((f) => f.id === "FE-AR-GASOIL");
+  if (id === "GWP-R134A") return state.factores.find((f) => f.id === "GWP-R134A");
+  return state.factores.find((f) => f.id === id);
+}
 function showToast(message, type = "success") { const node = document.createElement("div"); node.className = `toast ${type}`; node.textContent = message; document.getElementById("toast-container").appendChild(node); setTimeout(() => node.remove(), 3000); }
 function normalizeDate(v) { if (!v) return ""; return /^\d{4}-\d{2}$/.test(v) ? `${v}-01` : v; }
 function fmtDate(v) { return normalizeDate(v) ? new Date(normalizeDate(v)).toLocaleDateString("es-AR") : "-"; }
@@ -295,12 +304,12 @@ function evidenceSelectorHtml(selected = []) { if (!state.evidencias.length) ret
 function evidenceIndicator(record) { return hasEvidence(record) ? "✅" : "⚠️"; }
 
 function renderAlcance1() {
-  const el = panel("scope1"); const gwp = ["GWP-R410A", "GWP-R134a", "GWP-R32"]; const fuelEF = factorById("FE-S1-MEZCLA2T")?.valor || 2.31;
+  const el = panel("scope1"); const gwp = ["GWP-R410A", "GWP-R134A", "GWP-R32", "GWP-R22"]; const fuelEF = factorById("FE-AR-MEZCLA2T")?.valor || 2.38;
   const ref = filterByPeriod(state.scope1.refrigerants); const fuel = filterByPeriod(state.scope1.fuels);
   const auditorCols = state.auditorMode ? "<th>Factor ID</th><th>Timestamp</th>" : "";
   const refRows = ref.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.source}</td><td>${r.input}</td><td>${r.factor}</td><td>${formatEmission(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "manual"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="refrigerants" class="danger">Eliminar</button></td></tr>`).join("");
-  const fuelRows = fuel.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity}</td><td>${r.input}</td><td>${r.factor}</td><td>${formatEmission(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "FE-S1-MEZCLA2T"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="fuels" class="danger">Eliminar</button></td></tr>`).join("");
-  el.innerHTML = `<article class="card full"><h3>Alcance 1 (Directo) – Emisiones directas</h3><div class="btn-row"><button type="button" class="secondary" id="imp-s1-csv">Importar CSV</button><input id="imp-s1-file" type="file" accept=".csv,text/csv"></div><div class="grid-form"><label>Fecha<input type="date" id="s1r-fecha"></label><label>Equipo/Ubicación<input id="s1r-source"></label><label>Refrigerante<select id="s1r-type"><option value="GWP-R410A">R-410A</option><option value="GWP-R134a">R-134a</option><option value="GWP-R32">R-32</option><option value="OTRO">Otro</option></select></label><label>Kg recargados<input type="number" id="s1r-input" step="0.01"></label><label>GWP<input type="number" id="s1r-factor" step="0.01"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1r-notes"></label><button type="button" id="save-s1r">Guardar refrigerante</button></div><hr><div class="grid-form"><label>Fecha<input type="date" id="s1f-fecha"></label><label>Equipo/Actividad<input id="s1f-activity" value="Podadora"></label><label>Litros consumidos<input type="number" id="s1f-input" step="0.01"></label><label>EF kgCO2e/L<input type="number" id="s1f-factor" step="0.001" value="${fuelEF}"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1f-notes"></label><button type="button" id="save-s1f">Guardar combustible</button></div></article><article class="card full"><h3>Refrigerantes</h3>${showNoDataBanner(ref)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Fuente</th><th>Entrada kg</th><th>GWP</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${refRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article><article class="card full"><h3>Combustible</h3>${showNoDataBanner(fuel)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Actividad</th><th>Entrada L</th><th>EF</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${fuelRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article>`;
+  const fuelRows = fuel.map((r) => `<tr><td>${evidenceIndicator(r)}</td><td>${r.id}</td><td>${r.codigo || "-"}</td><td>${fmtDate(r.fecha)}</td><td>${r.activity}</td><td>${r.input}</td><td>${r.factor}</td><td>${formatEmission(emissionS1(r))}</td><td>${(r.evidenciaIds || []).join(",") || "-"}</td>${state.auditorMode ? `<td>${r.factorId || "FE-AR-MEZCLA2T"}</td><td>${r.updatedAt || "-"}</td>` : ""}<td class="actions"><button data-del="${r.id}" data-kind="fuels" class="danger">Eliminar</button></td></tr>`).join("");
+  el.innerHTML = `<article class="card full"><h3>Alcance 1 (Directo) – Emisiones directas</h3><div class="btn-row"><button type="button" class="secondary" id="imp-s1-csv">Importar CSV</button><input id="imp-s1-file" type="file" accept=".csv,text/csv"></div><div class="grid-form"><label>Fecha<input type="date" id="s1r-fecha"></label><label>Equipo/Ubicación<input id="s1r-source"></label><label>Refrigerante<select id="s1r-type"><option value="GWP-R410A">R-410A</option><option value="GWP-R134A">R-134a</option><option value="GWP-R32">R-32</option><option value="GWP-R22">R-22</option><option value="OTRO">Otro</option></select></label><label>Kg recargados<input type="number" id="s1r-input" step="0.01"></label><label>GWP<input type="number" id="s1r-factor" step="0.01"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1r-notes"></label><button type="button" id="save-s1r">Guardar refrigerante</button></div><hr><div class="grid-form"><label>Fecha<input type="date" id="s1f-fecha"></label><label>Equipo/Actividad<input id="s1f-activity" value="Podadora"></label><label>Litros consumidos<input type="number" id="s1f-input" step="0.01"></label><label>EF kgCO2e/L<input type="number" id="s1f-factor" step="0.001" value="${fuelEF}"></label><label class="span-2">Evidencias${evidenceSelectorHtml()}</label><label class="span-2">Notas<input id="s1f-notes"></label><button type="button" id="save-s1f">Guardar combustible</button></div></article><article class="card full"><h3>Refrigerantes</h3>${showNoDataBanner(ref)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Fuente</th><th>Entrada kg</th><th>GWP</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${refRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article><article class="card full"><h3>Combustible</h3>${showNoDataBanner(fuel)}<div class="table-wrap"><table><thead><tr><th>Ev</th><th>ID</th><th>Código</th><th>Fecha</th><th>Actividad</th><th>Entrada L</th><th>EF</th><th>tCO2e</th><th>Evidencias</th>${auditorCols}<th>Acciones</th></tr></thead><tbody>${fuelRows || "<tr><td colspan='12'>Sin datos cargados en el período seleccionado</td></tr>"}</tbody></table></div></article>`;
   const typeSel = document.getElementById("s1r-type"); const factorInput = document.getElementById("s1r-factor"); const setGwp = () => { if (typeSel.value !== "OTRO") factorInput.value = factorById(typeSel.value)?.valor || ""; }; typeSel.onchange = setGwp; setGwp();
   document.getElementById("save-s1r").onclick = () => {
     const ev = [...el.querySelectorAll("#save-s1r").item(0).closest(".grid-form").querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
@@ -309,7 +318,7 @@ function renderAlcance1() {
   };
   document.getElementById("save-s1f").onclick = () => {
     const secondForm = el.querySelectorAll(".grid-form")[1]; const ev = [...secondForm.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
-    state.scope1.fuels.push({ id: `S1-F-${String(state.nextIds.s1f++).padStart(3, "0")}`, fecha: document.getElementById("s1f-fecha").value, activity: document.getElementById("s1f-activity").value, input: Number(document.getElementById("s1f-input").value), factor: Number(document.getElementById("s1f-factor").value), factorId: "FE-S1-MEZCLA2T", evidenciaIds: ev, notes: document.getElementById("s1f-notes").value, updatedAt: new Date().toISOString() });
+    state.scope1.fuels.push({ id: `S1-F-${String(state.nextIds.s1f++).padStart(3, "0")}`, fecha: document.getElementById("s1f-fecha").value, activity: document.getElementById("s1f-activity").value, input: Number(document.getElementById("s1f-input").value), factor: Number(document.getElementById("s1f-factor").value), factorId: "FE-AR-MEZCLA2T", evidenciaIds: ev, notes: document.getElementById("s1f-notes").value, updatedAt: new Date().toISOString() });
     pushLog("Alta Alcance 1 combustible"); renderAll();
   };
   document.getElementById("imp-s1-csv").onclick = async () => { const f = document.getElementById("imp-s1-file").files[0]; if (!f) return; const total = importScope1Csv(await f.text()); pushLog(`Importar CSV Alcance 1 (${total})`); renderAll(); showToast(`Alcance 1 importado: ${total}`); };
@@ -334,7 +343,7 @@ function renderSimpleAlcance(tab, label, idPrefix) {
   document.getElementById(`save-${idPrefix}`).onclick = () => {
     const form = panel(tab).querySelector(".grid-form"); const ev = [...form.querySelectorAll('input[name="evidenciaIds"]:checked')].map((x) => x.value);
     if (tab === "scope2") scopeArr.push({ id: `S2-${String(state.nextIds.scope2++).padStart(3, "0")}`, fecha: document.getElementById("s2-fecha").value, kwh: parseNumber(document.getElementById("s2-kwh").value), source: document.getElementById("s2-source")?.value || "", dataQuality: document.getElementById("s2-quality")?.value || "Medido", assumptions: document.getElementById("s2-assumptions")?.value || "", evidenceId: ev[0] || "", factor_id: document.getElementById("s2-factor").value, evidenciaIds: ev, updatedAt: new Date().toISOString() });
-    if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, combustible_l: parseNumber(document.getElementById("s3-litros").value), litros: parseNumber(document.getElementById("s3-litros").value), tkm: parseNumber(document.getElementById("s3-tkm")?.value || ""), metrica: parseNumber(document.getElementById("s3-tkm")?.value || "") !== null ? "tkm" : "litros", factor_id: document.getElementById("s3-factor").value, fuelFactor: factorById("FE-S3-DIESEL")?.valor || 2.68, transportFactor: factorById("FE-S3-TKM")?.valor || factorById(document.getElementById("s3-factor").value)?.valor || 0, evidenciaIds: ev, updatedAt: new Date().toISOString() });
+    if (tab === "scope3") scopeArr.push({ id: `S3-${String(state.nextIds.scope3++).padStart(3, "0")}`, fecha: document.getElementById("s3-fecha").value, activity: document.getElementById("s3-activity").value, combustible_l: parseNumber(document.getElementById("s3-litros").value), litros: parseNumber(document.getElementById("s3-litros").value), tkm: parseNumber(document.getElementById("s3-tkm")?.value || ""), metrica: parseNumber(document.getElementById("s3-tkm")?.value || "") !== null ? "tkm" : "litros", factor_id: document.getElementById("s3-factor").value, fuelFactor: factorById("FE-AR-GASOIL")?.valor || 2.61, transportFactor: factorById("FE-S3-TKM")?.valor || factorById(document.getElementById("s3-factor").value)?.valor || 0, evidenciaIds: ev, updatedAt: new Date().toISOString() });
     pushLog(`Alta ${tab}`); renderAll();
   };
   if (tab === "scope2") {
@@ -489,8 +498,8 @@ function importScope1Csv(text) {
     }
     if (cantidad === null) missingCantidad += 1;
     const unit = unidadRaw.includes("kg") ? "kg" : "L";
-    const factorDefault = factorById("FE-S1-MEZCLA2T")?.valor || 2.31;
-    state.scope1.fuels.push({ id: nextScopeCode("s1f"), activity: base.source || "Combustible", input: cantidad, factor: factorDefault, factorId: "FE-S1-MEZCLA2T", fuelType: unit === "kg" ? "combustible_kg" : "nafta_2t", unit, sourceType: "fuel", ...base });
+    const factorDefault = factorById("FE-AR-MEZCLA2T")?.valor || 2.38;
+    state.scope1.fuels.push({ id: nextScopeCode("s1f"), activity: base.source || "Combustible", input: cantidad, factor: factorDefault, factorId: "FE-AR-MEZCLA2T", fuelType: unit === "kg" ? "combustible_kg" : "nafta_2t", unit, sourceType: "fuel", ...base });
     imported += 1;
   });
   updateImportDiagnostics("scope1", headers, mapped, { cantidad: missingCantidad, refrigerante_kg: missingRefrigerante });
@@ -523,7 +532,7 @@ function importScope2Csv(text) {
       evidenciaIds,
       evidenceUrl: resolveEvidenceUrl(pickMapped(row, mapped.link_evidencia), row.evidencia_url, row.evidence_url),
       codigo: pickMapped(row, mapped.id) || "",
-      factor_id: "FE-S2-AR",
+      factor_id: "FE-AR-ELEC-2021",
       updatedAt: new Date().toISOString()
     });
     imported += 1;
@@ -566,7 +575,7 @@ function importScope3Csv(text) {
       evidenciaIds,
       evidenceUrl: resolveEvidenceUrl(pickMapped(row, mapped.link_evidencia), row.evidencia_url, row.evidence_url),
       factor_id: "FE-S3-DIESEL",
-      fuelFactor: factorById("FE-S3-DIESEL")?.valor || 2.68,
+      fuelFactor: factorById("FE-AR-GASOIL")?.valor || 2.61,
       transportFactor: factorById("FE-S3-TKM")?.valor || 0,
       updatedAt: new Date().toISOString()
     });
@@ -603,8 +612,16 @@ function importEvidenceCsv(text) {
 }
 
 function renderFactores() {
-  panel("factores").innerHTML = `<article class="card full"><h3>Factores</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Alcance</th><th>Nombre</th><th>Valor</th><th>Unidad</th></tr></thead><tbody>${state.factores.map((f) => `<tr><td>${f.id}</td><td>${f.alcance}</td><td>${f.nombre}</td><td><input data-id="${f.id}" type="number" step="0.001" value="${f.valor}"></td><td>${f.unidad}</td></tr>`).join("")}</tbody></table></div><div class="btn-row"><input id="fver" value="${state.meta.factorsVersion}"><button id="save-factors">Guardar factores</button></div></article>`;
-  document.getElementById("save-factors").onclick = () => { panel("factores").querySelectorAll("[data-id]").forEach((i) => { factorById(i.dataset.id).valor = Number(i.value); }); state.meta.factorsVersion = document.getElementById("fver").value; state.meta.factorsUpdatedAt = new Date().toISOString(); pushLog("Factores actualizados"); renderAll(); };
+  const sourceLinks = (raw = "") => raw.split("|").map((url) => url.trim()).filter(Boolean).map((url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`).join("<br>");
+  panel("factores").innerHTML = `<article class="card full"><h3>Factores</h3><div class="table-wrap"><table><thead><tr><th>Default</th><th>ID</th><th>Nombre</th><th>Valor</th><th>Unidad</th><th>Año</th><th>Fuente</th><th>URL fuente</th><th>Nota</th></tr></thead><tbody>${state.factores.map((f) => `<tr><td><input data-default-id="${f.id}" type="checkbox" ${f.usar_por_defecto ? "checked" : ""}></td><td>${f.id}</td><td>${f.nombre}</td><td><input data-id="${f.id}" type="number" step="0.001" value="${f.valor}"></td><td>${f.unidad}</td><td>${f.anio_factor || "-"}</td><td>${f.fuente_nombre || "-"}</td><td>${sourceLinks(f.fuente_url)}</td><td>${f.nota || "-"}</td></tr>`).join("")}</tbody></table></div><div class="btn-row"><input id="fver" value="${state.meta.factorsVersion}"><button id="save-factors">Guardar factores</button></div></article>`;
+  document.getElementById("save-factors").onclick = () => {
+    panel("factores").querySelectorAll("[data-id]").forEach((i) => { factorById(i.dataset.id).valor = Number(i.value); });
+    panel("factores").querySelectorAll("[data-default-id]").forEach((i) => { factorById(i.dataset.defaultId).usar_por_defecto = i.checked; });
+    state.meta.factorsVersion = document.getElementById("fver").value;
+    state.meta.factorsUpdatedAt = new Date().toISOString();
+    pushLog("Factores actualizados");
+    renderAll();
+  };
 }
 
 function renderEvidencias() {
@@ -717,14 +734,20 @@ function generatePdf() {
   doc.setFont("helvetica", "bold"); doc.text("Resumen ejecutivo", 14, 62); doc.setFont("helvetica", "normal");
   doc.autoTable({ startY: 66, theme: "grid", styles: { font: "helvetica", fontSize: 9 }, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Alcance", "tCO2e", "Cobertura evidencias"]], body: [["Alcance 1 (Directo)", t4(t1), `${coverage(s1).toFixed(1)}%`], ["Alcance 2 (Electricidad)", t4(t2), `${coverage(s2).toFixed(1)}%`], ["Alcance 3 (Indirecto: Transporte y otros)", t4(t3), `${coverage(s3).toFixed(1)}%`], ["Total", t4(t1 + t2 + t3), `${coverage([...s1, ...s2, ...s3]).toFixed(1)}%`]] });
   doc.text("Supuestos y límites", 14, doc.lastAutoTable.finalY + 8); doc.setFontSize(9); doc.text(["• Depende de datos de actividad y factores cargados.", "• Límites organizacionales declarados por el usuario.", "• No incluye emisiones no registradas en la herramienta."], 14, doc.lastAutoTable.finalY + 14);
-  let y = doc.lastAutoTable.finalY + 30;
+  const metodologiaY = doc.lastAutoTable.finalY + 34;
+  doc.setFont("helvetica", "bold"); doc.text("Metodología y fuentes", 14, metodologiaY);
+  doc.setFont("helvetica", "normal");
+  doc.text("Para electricidad comprada se utiliza como referencia la serie oficial de la Secretaría de Energía para el factor de emisión de la red argentina. Para combustibles líquidos se utiliza la metodología oficial de la Secretaría de Energía para emisiones de CO2 asociadas a ventas al público de combustibles. Para refrigerantes se utilizan GWPs de referencia internacional ampliamente aceptados (EPA/GHG Protocol/IPCC), dejando trazabilidad explícita del valor elegido, el año y la fuente.", 14, metodologiaY + 6, { maxWidth: 180 });
+  let y = metodologiaY + 18;
 
   y = pdfAlcanceTable(doc, y, "Alcance 1 (Directo)", s1, (r) => [fmtDate(r.fecha), r.source || r.activity || "-", `${r.input ?? "-"} ${r.kind === "refrigerant" ? "kg" : (r.unit || "L")}`, `${r.factor ?? "-"}`, formatEmission(emissionS1(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
   y = pdfAlcanceTable(doc, y, "Alcance 2 (Electricidad)", s2, (r) => [fmtDate(r.fecha), "Electricidad", `${r.kwh ?? "-"} kWh`, `${factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS2(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
   if (y > 250) { doc.addPage(); y = 20; }
   y = pdfAlcanceTable(doc, y, "Alcance 3 (Indirecto: Transporte y otros)", s3, (r) => [fmtDate(r.fecha), r.activity || "-", r.combustible_l !== null && r.combustible_l !== undefined ? `${r.combustible_l} L` : (r.tkm !== null && r.tkm !== undefined ? `${r.tkm} tkm` : "-"), `${(r.combustible_l !== null && r.combustible_l !== undefined ? r.fuelFactor : r.transportFactor) || factorById(r.factor_id)?.valor || "-"}`, formatEmission(emissionS3(r)), (r.evidenceUrl || (r.evidenciaIds || []).join("|")) || "-"]);
 
-  doc.autoTable({ startY: y + 3, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Factores utilizados", "Valor", "Unidad"]], body: state.factores.map((f) => [f.id, String(f.valor), f.unidad]) });
+  doc.setFont("helvetica", "bold"); doc.text("Factores utilizados y vigencia", 14, y);
+  doc.setFont("helvetica", "normal");
+  doc.autoTable({ startY: y + 3, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, head: [["Factor", "Valor", "Unidad", "Año", "Fuente", "Default (sí/no)"]], body: state.factores.map((f) => [f.nombre || f.id, String(f.valor), f.unidad || "-", String(f.anio_factor || "-"), f.fuente_nombre || "-", f.usar_por_defecto ? "Sí" : "No"]) });
   const recordsInPeriod = [...s1, ...s2, ...s3];
   const evidenciasPeriodo = state.evidencias.filter((e) => linkedRecordsByEvidenceId(e.id).some((id) => recordsInPeriod.some((r) => r.id === id)));
   let sectionY = doc.lastAutoTable.finalY + 4;

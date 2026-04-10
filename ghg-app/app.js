@@ -205,8 +205,8 @@ function hasEvidence(r) {
     return Boolean(String(ev?.url_view || ev?.url || ev?.url_download || "").trim());
   });
 }
-function allAlcance1Records() { return [...state.scope1.refrigerants.map((r) => ({ ...r, kind: "refrigerant" })), ...state.scope1.fuels.map((r) => ({ ...r, kind: "fuel" }))]; }
-function allRecords() { return [...allAlcance1Records(), ...state.scope2.map((r) => ({ ...r, scope: "scope2" })), ...state.scope3.map((r) => ({ ...r, scope: "scope3" }))]; }
+function allAlcance1Records() { return [...state.scope1.refrigerants, ...state.scope1.fuels]; }
+function allRecords() { return [...allAlcance1Records(), ...state.scope2, ...state.scope3]; }
 
 function emissionS1(r) {
   const input = r.input;

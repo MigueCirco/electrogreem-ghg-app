@@ -202,7 +202,7 @@ function hasEvidence(r) {
   if (String(r.evidenceUrl || "").trim()) return true;
   return (r.evidenciaIds || []).some((id) => {
     const ev = state.evidencias.find((e) => e.id === id);
-    return Boolean(String(ev?.url_view || ev?.url || "").trim());
+    return Boolean(String(ev?.url_view || ev?.url || ev?.url_download || "").trim());
   });
 }
 function allAlcance1Records() { return [...state.scope1.refrigerants.map((r) => ({ ...r, kind: "refrigerant" })), ...state.scope1.fuels.map((r) => ({ ...r, kind: "fuel" }))]; }
@@ -850,10 +850,14 @@ function downloadBlob(content, type, filename) { const blob = new Blob([content]
 
 function pdfEvidenceCell(record) {
   const ids = record.evidenciaIds || [];
-  const linkedEvidence = ids.map((id) => state.evidencias.find((e) => e.id === id)).find(Boolean);
+  const linkedEvidence = ids
+    .map((id) => state.evidencias.find((e) => e.id === id))
+    .find((e) => String(e?.url_view || e?.url || e?.url_download || "").trim());
+  const fallbackEvidence = ids.map((id) => state.evidencias.find((e) => e.id === id)).find(Boolean);
   const linkedUrl = linkedEvidence?.url_view || linkedEvidence?.url || linkedEvidence?.url_download || "";
   const url = (record.evidenceUrl || linkedUrl || "").trim();
   if (url) return { text: "Abrir evidencia", url };
+  if (fallbackEvidence?.id) return { text: fallbackEvidence.id, url: "" };
   if (ids.length) return { text: ids[0], url: "" };
   return { text: "-", url: "" };
 }
@@ -978,7 +982,10 @@ function generatePdf() {
     doc.text("Sin evidencias vinculadas en el período seleccionado.", 18, sectionY + 13);
     sectionY += 24;
   } else {
-    doc.autoTable({ startY: sectionY + 4, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, styles: { fontSize: 8.5, cellPadding: 2, overflow: "linebreak" }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: evidenciasPeriodo.map((e) => [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", e.url_view ? "Abrir evidencia" : "Sin enlace"]), didDrawCell: (data) => {
+    doc.autoTable({ startY: sectionY + 4, headStyles: { fillColor: [234, 220, 198], textColor: 30 }, styles: { fontSize: 8.5, cellPadding: 2, overflow: "linebreak" }, head: [["Trazabilidad", "Tipo", "Archivo", "Hash", "Fecha", "Vínculo"]], body: evidenciasPeriodo.map((e) => {
+      const url = e.url_view || e.url || e.url_download || "";
+      return [e.id, e.tipo, e.archivo_nombre, e.hash, e.fecha_documento || "-", url ? "Abrir evidencia" : "Sin enlace"];
+    }), didDrawCell: (data) => {
       if (data.section !== "body" || data.column.index !== 5) return;
       const ev = evidenciasPeriodo[data.row.index];
       const url = ev?.url_view || ev?.url || ev?.url_download || "";

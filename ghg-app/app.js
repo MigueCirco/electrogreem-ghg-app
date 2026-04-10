@@ -798,7 +798,7 @@ function renderFactores() {
 }
 
 function renderEvidencias() {
-  const facturaEvidence = ensureFacturaEvidence();
+  const facturaEvidence = state.evidencias.find((e) => e.id === FACTURA_EVIDENCE_ID);
   const recordOptions = allRecords().map((r) => `<option value="${r.id}">${recordLabel(r)} · ${getRecordMeta(r.id)?.alcance || "-"}</option>`).join("");
   panel("evidencias").innerHTML = `<article class="card full"><h3>Evidencias y trazabilidad</h3><div class="btn-row"><button id="imp-evidencias-csv" class="secondary">Importar CSV evidencias</button><input id="imp-evidencias-file" type="file" accept=".csv,text/csv"></div><div class="grid-form"><label>Tipo<select id="ev-tipo"><option>Factura electricidad</option><option>Ticket/Factura combustible</option><option>Servicio técnico HVAC</option><option>Manifiesto de transporte</option><option>Otro</option></select></label><label>Alcance<select id="ev-alcance"><option>S1</option><option>S2</option><option>S3</option></select></label><label>Período desde<input type="date" id="ev-periodo-desde"></label><label>Período hasta<input type="date" id="ev-periodo-hasta"></label><label>Proveedor / Origen<input id="ev-proveedor" placeholder="Proveedor, entidad o fuente"></label><label>Fecha documento<input type="date" id="ev-fecha"></label><label class="span-2">Nota de auditoría<input id="ev-nota-auditoria" placeholder="Observaciones de trazabilidad"></label><label class="span-2">Archivo<input type="file" id="ev-file"></label><label class="span-2">Pegar link de Drive<input id="ev-drive-link" placeholder="https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing"></label><label class="span-2">URL vista<input id="ev-url-view" placeholder="https://..."></label><label class="span-2">URL descarga<input id="ev-url-download" placeholder="https://..."></label><label class="span-2">Vincular a registro (buscar por ID/código)<input list="ev-link-list" id="ev-link" placeholder="S2-001 o código"><datalist id="ev-link-list">${recordOptions}</datalist></label><div class="btn-row span-2"><a class="button-like secondary" href="${DRIVE_FOLDER_URL}" target="_blank" rel="noopener">Subir evidencia a Drive</a><button type="button" id="save-ev">Guardar evidencia</button></div></div></article><article class="card full"><h4>Evidencia demo factura EDET</h4><div class="grid-form"><label class="span-2">URL editable<input id="factura-edet-url" value="${facturaEvidence.url_view || ""}" placeholder="https://..."></label><button type="button" id="save-factura-edet-url">Guardar URL factura EDET</button></div></article><article class="card full"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tipo</th><th>Alcance</th><th>Periodo</th><th>Proveedor/Origen</th><th>Nota auditoría</th><th>Archivo</th><th>Ver/Descargar</th><th>Vinculación</th><th>Acciones</th></tr></thead><tbody>${state.evidencias.map((e) => {
     const periodo = e.periodo_desde || e.periodo_hasta ? `${e.periodo_desde || "-"} / ${e.periodo_hasta || "-"}` : "-";
@@ -821,9 +821,9 @@ function renderEvidencias() {
   document.getElementById("imp-evidencias-csv").onclick = async () => { const f = document.getElementById("imp-evidencias-file").files[0]; if (!f) return; const total = importEvidenceCsv(await f.text()); pushLog(`Importar CSV evidencias (${total})`); renderAll(); showToast(`Evidencias importadas: ${total}`); };
 
   panel("evidencias").querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
-    if (b.dataset.del === FACTURA_EVIDENCE_ID) return showToast("La evidencia demo EDET no se puede eliminar", "error");
     state.evidencias = state.evidencias.filter((x) => x.id !== b.dataset.del);
     allRecords().forEach((r) => r.evidenciaIds = (r.evidenciaIds || []).filter((id) => id !== b.dataset.del));
+    pushLog(`Baja evidencia ${b.dataset.del}`);
     renderAll();
   });
 }
